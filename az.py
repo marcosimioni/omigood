@@ -5,6 +5,74 @@ from azure.mgmt.resource import SubscriptionClient, ResourceManagementClient
 from azure.mgmt.compute import ComputeManagementClient
 from azure.mgmt.network import NetworkManagementClient
 
+script = """
+#!/bin/bash
+MINVER=1.6.8.1
+REGEX="OMI\-([0-9\.]*)\-"
+
+# https://stackoverflow.com/questions/4023830/how-to-compare-two-strings-in-dot-separated-version-format-in-bash
+vercomp () {
+    if [[ $1 == $2 ]]
+    then
+        return 0
+    fi
+    local IFS=.
+    local i ver1=($1) ver2=($2)
+    # fill empty fields in ver1 with zeros
+    for ((i=${#ver1[@]}; i<${#ver2[@]}; i++))
+    do
+        ver1[i]=0
+    done
+    for ((i=0; i<${#ver1[@]}; i++))
+    do
+        if [[ -z ${ver2[i]} ]]
+        then
+            # fill empty fields in ver2 with zeros
+            ver2[i]=0
+        fi
+        if ((10#${ver1[i]} > 10#${ver2[i]}))
+        then
+            return 1
+        fi
+        if ((10#${ver1[i]} < 10#${ver2[i]}))
+        then
+            return 2
+        fi
+    done
+    return 0
+}
+
+OMIPATH="/opt/omi/bin/omiserver"
+if ! [[ -x $OMIPATH ]]; then
+        echo "OMI not found"
+        exit 0
+fi
+OMIVERSION=$($OMIPATH --version)
+
+
+if ! [[ $OMIVERSION =~ $REGEX ]];
+then
+        echo "Cannot detect OMI version"
+        exit 2
+else
+        omi=${BASH_REMATCH[1]}
+fi
+echo -n "OMI version: $omi..."
+
+vercomp $MINVER $omi
+case $? in
+        0) op=0;;
+        1) op=1;;
+        2) op=0;;
+esac
+
+if [[ $op == 1 ]]; then
+        echo "VULNERABLE!"
+else
+        echo "OK!"
+fi
+exit $op
+"""
 #%%
 credential = AzureCliCredential()
 subscription_client = SubscriptionClient(credential)
@@ -50,9 +118,7 @@ for s in subscription_client.subscriptions.list():
             print(f'Running the command...')
             run_command_parameters = {
                 'command_id': 'RunShellScript', 
-                'script': [
-                    'dpkg -l omi'
-                ]
+                'script': script.split('\n')
             }
             poller = cm.virtual_machines.begin_run_command(
                     rg.name,
@@ -60,4 +126,8 @@ for s in subscription_client.subscriptions.list():
                     run_command_parameters
             )
             result = poller.result()  
-            print(result.value[0].message) 
+            message = result.value[0].message
+            print(f'Message is: {message}')
+            if 'VULNERABLE' in message:
+                print('MACHINE IS VULNERABLE!')
+
