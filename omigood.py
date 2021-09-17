@@ -19,13 +19,8 @@ LOGGER = logging.getLogger(__name__)
 app = Flask(__name__)
 
 csp = {
-    'default-src': '\'self\' *.unpkg.com',
-    'img-src': '*',
-    'media-src': [
-        'media1.com',
-        'media2.com',
-    ],
-    'script-src': '*.googleapis.com'
+    'default-src': '\'self\' \'unsafe-inline\' *.unpkg.com',
+    'script-src': '\'self\' \'unsafe-inline\' *.googleapis.com'
 }
 Talisman(app, content_security_policy=csp) # comment this out when running in localhost for now
 
