@@ -249,12 +249,12 @@ def check_vm_netsec(nm: NetworkManagementClient, vm_name: str, vm_network_profil
         if not network_interface.network_security_group:
             logger.debug(f'Interface {interface_info.get("resource_name")} has no Network Security Group set on VM {vm_name}')
         else:
-            nsg_rules = check_nsg(nm, network_interface.network_security_group.id, vm_name)
-            intf_config_string+= print_rules(nsg_rules, 'Network Security Rules')
+            vm_interface['nsg_rules'] = check_nsg(nm, network_interface.network_security_group.id, vm_name)
+            intf_config_string+= print_rules(vm_interface['nsg_rules'], 'Network Security Rules')
         # Effective Security Rules
         if check_effective:
-            effective_rules= check_effective_security_rules(nm, interface_info, vm_name)
-            intf_config_string+= print_rules(effective_rules, 'Effective Security Rules')
+            vm_interface['effective_rules']= check_effective_security_rules(nm, interface_info, vm_name)
+            intf_config_string+= print_rules(vm_interface['effective_rules'], 'Effective Security Rules')
         # logger.debug(f'Output from get_effective_security_rules on VM {vm_name}: {",".join([json.dumps(a.__dict__) for a in result.value[0].effective_security_rules])}')
         logger.info(intf_config_string)
         vm_interfaces.append(vm_interface)
