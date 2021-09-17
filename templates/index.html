@@ -24,39 +24,44 @@
     </style>
   </head>
   <body>
-    <div class="wrapper" style="background: white;">
-      <div class="bx--form-item">
-          <p>
-            The Wiz Research Team recently found four critical vulnerabilities in OMI, which is one of Azure's most ubiquitous yet least known software agents and is deployed on a large portion of Linux VMs in Azure.
+    <form id="the-form">
+      <div class="wrapper" style="background: white;">
+        <div class="bx--form-item">
+            <p>
+              The Wiz Research Team recently found four critical vulnerabilities in OMI, which is one of Azure's most ubiquitous yet least known software agents and is deployed on a large portion of Linux VMs in Azure.
+            </p>
+            <p>
+              The vulnerabilities are very easy to exploit, allowing attackers to remotely execute arbitrary code within the network with a single request and escalate to root privileges.
+            </p>
+            <p>
+              For more informations, please visit the researchers' <a href="https://www.wiz.io/blog/omigod-critical-vulnerabilities-in-omi-azure">blog post</a>.
+            </p>
+        </div>
+        <div class="bx--form-item">
+            <p>
+              If you want to know if your Linux VM is vulnerabile, enter the IP address or URL below and press the "Check now" button.
+            </p>
+        </div>
+        <div class="bx--form-item">
+          <input id="fqdn" name="fqdn" type="text" class="bx--text-input" placeholder="www.myazurebox.com">
+          <label for="fqdn" class="bx--label">Please enter the FQDN you want to check</label>
+        </div>
+        <div class="bx--form-item">
+          {{ recaptcha }} <!-- Refer to 'recaptcha' variable in main.py -->
+        </div>
+        <div class="bx--form-item">
+          <button id="check" class="bx--btn bx--btn--primary" type="button">Check now</button>
+        </div>
+        <div id="checking" style="display: none;">
+          <div aria-atomic="true" aria-labelledby="loading-id-3" aria-live="assertive" class="bx--loading bx--loading--small"><label id="loading-id-3" class="bx--visually-hidden">Active loading indicator</label><svg class="bx--loading__svg" viewBox="0 0 100 100"><title>Active loading indicator</title><circle class="bx--loading__background" cx="50%" cy="50%" r="44"></circle><circle class="bx--loading__stroke" cx="50%" cy="50%" r="44"></circle></svg></div>
+        </div>
+        <div id="result" style="display: none;">
+          <p class="info">
+            This is the check result.
           </p>
-          <p>
-            The vulnerabilities are very easy to exploit, allowing attackers to remotely execute arbitrary code within the network with a single request and escalate to root privileges.
-          </p>
-          <p>
-            For more informations, please visit the researchers' <a href="https://www.wiz.io/blog/omigod-critical-vulnerabilities-in-omi-azure">blog post</a>.
-          </p>
+        </div>
       </div>
-      <div class="bx--form-item">
-          <p>
-            If you want to know if your Linux VM is vulnerabile, enter the IP address or URL below and press the "Check now" button.
-          </p>
-      </div>
-      <div class="bx--form-item">
-        <input id="fqdn" name="fqdn" type="text" class="bx--text-input" placeholder="www.myazurebox.com">
-        <label for="fqdn" class="bx--label">Please enter the FQDN you want to check</label>
-      </div>
-      <div class="bx--form-item">
-        <button id="check" class="bx--btn bx--btn--primary" type="button">Check now</button>
-      </div>
-      <div id="checking" style="display: none;">
-        <div aria-atomic="true" aria-labelledby="loading-id-3" aria-live="assertive" class="bx--loading bx--loading--small"><label id="loading-id-3" class="bx--visually-hidden">Active loading indicator</label><svg class="bx--loading__svg" viewBox="0 0 100 100"><title>Active loading indicator</title><circle class="bx--loading__background" cx="50%" cy="50%" r="44"></circle><circle class="bx--loading__stroke" cx="50%" cy="50%" r="44"></circle></svg></div>
-      </div>
-      <div id="result" style="display: none;">
-        <p class="info">
-          This is the check result.
-        </p>
-      </div>
-    </div>
+    </form>
     <script>
       function disableSubmit() {
         $("#check").prop('disabled',true);
@@ -80,6 +85,9 @@
       function hideResult() {
         $("#result").hide();
       }
+      function resetCaptcha() {
+        grecaptcha.reset();
+      }
       function preChecking() {
         disableSubmit();
         hideResult();
@@ -89,9 +97,13 @@
         hideChecking();
         showResult();
         enableSubmit();
+        resetCaptcha();
       }
       function isValidFQDN(fqdn) {
         return true;
+      }
+      function isCaptchaChecked() {
+        return grecaptcha && grecaptcha.getResponse().length !== 0;
       }
 
       DONT_KNOW = 0;
@@ -101,14 +113,13 @@
       GENERIC_ERROR = -1;
       FQDN_NOT_PROVIDED = -2;
       INVALID_FQDN = -3;
+      CAPTCHA_ERROR = -999;
 
       function checkFQDN(fqdn, callback) {
         $.ajax({
             url : '/check',
-            type : 'GET',
-            data : {
-                'fqdn' : fqdn
-            },
+            type : 'POST',
+            data : $('form#the-form').serialize(),
             dataType : 'json',
             success : function(data) {
               if (data) {
@@ -124,10 +135,17 @@
       }
 
       $("#check").click(function() {
-        fqdn = $("#fqdn").val();
-        if (!isValidFQDN(fqdn)) {
+        if (!isCaptchaChecked()) {
+          updateResult('error',`Please prove that you are not a robot.`);
           return;
         }
+
+        fqdn = $("#fqdn").val();
+        if (!isValidFQDN(fqdn)) {
+          updateResult('error',`Invalid fqdn provided: please enter a hostname or an IP address.`);
+          return;
+        }
+
         preChecking();
         checkFQDN(fqdn, function (result, fqdn, port) {
           switch (result) {
@@ -137,6 +155,10 @@
 
             case OMI_EXPOSED_AND_VULNERABLE: // vulnerable
               updateResult('error',`Your machine ${fqdn} exposes OMI on port ${port} and is vulnerable! It is recommended to patch immediately and also review your Network Security Group, unless you have a good reason to do so and you know what you are doing.`);
+              break;
+
+            case CAPTCHA_ERROR:
+              updateResult('error',`Please prove that you are not a robot.`);
               break;
 
             default: // don't known
