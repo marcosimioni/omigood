@@ -34,7 +34,10 @@
               The vulnerabilities are very easy to exploit, allowing attackers to remotely execute arbitrary code within the network with a single request and escalate to root privileges.
             </p>
             <p>
-              For more informations, please visit the researchers' <a href="https://www.wiz.io/blog/omigod-critical-vulnerabilities-in-omi-azure">blog post</a>.
+              For more informations, please visit the <a href="https://www.wiz.io/blog/omigod-critical-vulnerabilities-in-omi-azure">blog post</a> published by the Wiz Research Team as well as the <a href="https://msrc.microsoft.com/update-guide/vulnerability/CVE-2021-38647">update guide</a> released by Microsoft.
+            </p>
+            <p>
+              Please note this page and its associated tools are not affiliated with Wix nor Microsoft.
             </p>
         </div>
         <div class="bx--form-item">
@@ -44,7 +47,7 @@
         </div>
         <div class="bx--form-item">
           <input id="fqdn" name="fqdn" type="text" class="bx--text-input" placeholder="www.myazurebox.com">
-          <label for="fqdn" class="bx--label">Please enter the FQDN you want to check</label>
+          <label for="fqdn" class="bx--label">Please enter the FQDN or IP address that you want to check</label>
         </div>
         <div class="bx--form-item">
           {{ recaptcha }} <!-- Refer to 'recaptcha' variable in main.py -->
@@ -196,7 +199,7 @@
               }
 
               if (vulnerable_ports != "") {
-                updateResult('error',`Your machine ${fqdn} exposes OMI on port(s) ${vulnerable_ports.substring(1)} and is vulnerable! It is recommended to patch immediately and also review your Network Security Group, unless you have a good reason to not do so and you know what you are doing.`);
+                updateResult('error',`Your machine ${fqdn} exposes a vulnerable version of OMI on port(s) ${vulnerable_ports.substring(1)}: it is recommended to patch immediately and also review your Network Security Group, unless you have a good reason to not do so and you know what you are doing. Please check the official guidance available at the resources linked above.`);
               } else if (listening_ports != "") {
                 updateResult('error',`Your machine ${fqdn} exposes OMI on port(s) ${listening_ports.substring(1)} but it is not vulnerable: it is recommended to review your Network Security Group, unless you have a good reason to not do so and you know what you are doing.`);
               } else {

@@ -55,12 +55,8 @@ def omi_check(url):
         LOGGER.debug(f"Testing {uri}...")
 
         # Suppress only the single warning from urllib3 needed.
-        requests.packages.urllib3.disable_warnings(category=InsecureRequestWarning)
-
-        # Set `verify=False` on `requests.post`.
-        requests.post(url='https://example.com', data={'bar':'baz'}, verify=False)
-
-        response = requests.post(uri, data=body, headers=headers,  timeout=10)
+        #requests.packages.urllib3.disable_warnings(category=InsecureRequestWarning)
+        response = requests.post(uri, data=body, headers=headers,  timeout=10, verify=False)
         LOGGER.debug(f"Received status_code={response.status_code}")
         if response.status_code == 200:
             return 1
