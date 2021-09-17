@@ -27,7 +27,7 @@ csp = {
     ],
     'script-src': '*.googleapis.com'
 }
-Talisman(app) # comment this out when running in localhost for now
+Talisman(app, content_security_policy=csp) # comment this out when running in localhost for now
 
 RECAPTCHA_SITE_KEY = os.getenv('RECAPTCHA_SITE_KEY', None)
 if not RECAPTCHA_SITE_KEY:
