@@ -4,14 +4,13 @@ import requests
 
 class OmiCheck:
 
-    def __init__(self, url, port):
+    def __init__(self, url):
 
         self.__url = url
-        self.__port = port
 
     def check(self):
 
-        uri = f"http://{self.__url}:{self.__port}/wsman"
+        uri = f"{self.__url}/wsman"
 
         body = f"""
 <s:Envelope xmlns:s="http://www.w3.org/2003/05/soap-envelope" xmlns:a="http://schemas.xmlsoap.org/ws/2004/08/addressing" xmlns:h="http://schemas.microsoft.com/wbem/wsman/1/windows/shell" xmlns:n="http://schemas.xmlsoap.org/ws/2004/09/enumeration" xmlns:p="http://schemas.microsoft.com/wbem/wsman/1/wsman.xsd" xmlns:w="http://schemas.dmtf.org/wbem/wsman/1/wsman.xsd" xmlns:xsi="http://www.w3.org/2001/XMLSchema">
@@ -45,7 +44,7 @@ class OmiCheck:
             'User-Agent': 'Microsoft WinRM Client'
         }
 
-        response = requests.post(uri, data=body, headers=headers)
+        response = requests.post(uri, data=body, headers=headers,  timeout=10)
 
         if response.status_code == 200:
             return True

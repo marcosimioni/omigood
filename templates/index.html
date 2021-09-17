@@ -11,6 +11,16 @@
       .bx--form-item {
         margin-bottom: 1.5rem;
       }
+
+      .warning {
+        color: orange;
+      }
+      .error {
+        color: red;
+      }
+      .info {
+        color: black;
+      }
     </style>
   </head>
   <body>
@@ -32,120 +42,110 @@
           </p>
       </div>
       <div class="bx--form-item">
-        <input id="text-input-3" type="text" class="bx--text-input" placeholder="www.myazurebox.com">
-        <label for="text-input-3" class="bx--label">Please enter the URL you want to check</label>
+        <input id="fqdn" name="fqdn" type="text" class="bx--text-input" placeholder="www.myazurebox.com">
+        <label for="fqdn" class="bx--label">Please enter the FQDN you want to check</label>
       </div>
       <div class="bx--form-item">
         <button id="check" class="bx--btn bx--btn--primary" type="button">Check now</button>
       </div>
+      <div id="checking" style="display: none;">
+        <div aria-atomic="true" aria-labelledby="loading-id-3" aria-live="assertive" class="bx--loading bx--loading--small"><label id="loading-id-3" class="bx--visually-hidden">Active loading indicator</label><svg class="bx--loading__svg" viewBox="0 0 100 100"><title>Active loading indicator</title><circle class="bx--loading__background" cx="50%" cy="50%" r="44"></circle><circle class="bx--loading__stroke" cx="50%" cy="50%" r="44"></circle></svg></div>
+      </div>
+      <div id="result" style="display: none;">
+        <p class="info">
+          This is the check result.
+        </p>
+      </div>
     </div>
-    <div class="wrapper" style="background: white;">
-      <ul data-progress data-progress-current class="bx--progress">
-        <li id="progress-checking" class="bx--progress-step bx--progress-step--incomplete">
-          <svg>
-            <circle cx="12" cy="12" r="12"></circle>
-            <circle cx="12" cy="12" r="6"></circle>
-          </svg>
-          <p class="bx--progress-label">Checking</p>
-          <span class="bx--progress-line"></span>
-        </li>
-        <li id="progress-done" class="bx--progress-step bx--progress-step--incomplete">
-          <svg>
-            <circle cx="12" cy="12" r="12"></circle>
-          </svg>
-          <p class="bx--progress-label">Ready</p>
-          <span class="bx--progress-line"></span>
-        </li>
-      </ul>
-    </div>
-    <div class="wrapper">
-      <div data-notification class="bx--inline-notification bx--inline-notification--error" role="alert">
-        <div class="bx--inline-notification__details">
-          <svg class="bx--inline-notification__icon" width="16" height="16" viewBox="0 0 16 16" xmlns="http://www.w3.org/2000/svg">
-            <path d="M8 16A8 8 0 1 1 8 0a8 8 0 0 1 0 16zM3.293 4.707l8 8 1.414-1.414-8-8-1.414 1.414z" fill-rule="evenodd" />
-          </svg>
-          <div class="bx--inline-notification__text-wrapper">
-            <p class="bx--inline-notification__title">Vulnerable</p>
-            <p class="bx--inline-notification__subtitle">Your OMI service is exposed and it appears to be vulnerable. You must patch immediately, please refer to</p>
-          </div>
-        </div>
-        <button data-notification-btn class="bx--inline-notification__close-button" type="button">
-          <svg class="bx--inline-notification__close-icon" aria-label="close" width="10" height="10" viewBox="0 0 10 10" xmlns="http://www.w3.org/2000/svg">
-            <path d="M6.32 5L10 8.68 8.68 10 5 6.32 1.32 10 0 8.68 3.68 5 0 1.32 1.32 0 5 3.68 8.68 0 10 1.32 6.32 5z" fill-rule="nonzero"
-            />
-          </svg>
-        </button>
-      </div>
+    <script>
+      function disableSubmit() {
+        $("#check").prop('disabled',true);
+      }
+      function enableSubmit() {
+        $("#check").prop('disabled',false);
+      }
+      function showChecking() {
+        $("#checking").show();
+      }
+      function hideChecking() {
+        $("#checking").hide();
+      }
+      function updateResult(type,text) {
+        $("#result p").removeClass('error warning info').addClass(type);
+        $("#result p").text(text);
+      }
+      function showResult() {
+        $("#result").show();
+      }
+      function hideResult() {
+        $("#result").hide();
+      }
+      function preChecking() {
+        disableSubmit();
+        hideResult();
+        showChecking();
+      }
+      function postChecking() {
+        hideChecking();
+        showResult();
+        enableSubmit();
+      }
+      function isValidFQDN(fqdn) {
+        return true;
+      }
 
-      <div data-notification class="bx--inline-notification bx--inline-notification--success" aria-live="polite">
-        <div class="bx--inline-notification__details">
-          <svg class="bx--inline-notification__icon" width="16" height="16" viewBox="0 0 16 16" xmlns="http://www.w3.org/2000/svg">
-            <path d="M8 16A8 8 0 1 1 8 0a8 8 0 0 1 0 16zm3.293-11.332L6.75 9.21 4.707 7.168 3.293 8.582 6.75 12.04l5.957-5.957-1.414-1.414z"
-              fill-rule="evenodd" />
-          </svg>
-          <div class="bx--inline-notification__text-wrapper">
-            <p class="bx--inline-notification__title">Not vulnerable</p>
-            <p class="bx--inline-notification__subtitle">Your OMI agent is exposed via port <span>0<span> but it appears to NOT be vulnerable. You should not be vulnerable to CVE-123.</p>
-          </div>
-        </div>
-        <button data-notification-btn class="bx--inline-notification__close-button" type="button">
-          <svg class="bx--inline-notification__close-icon" aria-label="close" width="10" height="10" viewBox="0 0 10 10" xmlns="http://www.w3.org/2000/svg">
-            <path d="M6.32 5L10 8.68 8.68 10 5 6.32 1.32 10 0 8.68 3.68 5 0 1.32 1.32 0 5 3.68 8.68 0 10 1.32 6.32 5z" fill-rule="nonzero"
-            />
-          </svg>
-        </button>
-      </div>
+      DONT_KNOW = 0;
+      OMI_EXPOSED_BUT_NOT_VULNERABLE = 1;
+      OMI_EXPOSED_AND_VULNERABLE = 2;
 
-      <div data-notification class="bx--inline-notification bx--inline-notification--warning" role="alert">
-        <div class="bx--inline-notification__details">
-          <svg class="bx--inline-notification__icon" width="16" height="16" viewBox="0 0 16 16" xmlns="http://www.w3.org/2000/svg">
-            <path d="M.75 16a.75.75 0 0 1-.67-1.085L7.33.415a.75.75 0 0 1 1.34 0l7.25 14.5A.75.75 0 0 1 15.25 16H.75zm6.5-10v5h1.5V6h-1.5zM8 13.5A.75.75 0 1 0 8 12a.75.75 0 0 0 0 1.5z"
-              fill-rule="nonzero" />
-          </svg>
-          <div class="bx--inline-notification__text-wrapper">
-            <p class="bx--inline-notification__title">Unknown</p>
-            <p class="bx--inline-notification__subtitle">It appears that your OMI service is not exposed. It is not possible to check if you are vulnerable or not.</p>
-          </div>
-        </div>
-        <button data-notification-btn class="bx--inline-notification__close-button" type="button">
-          <svg class="bx--inline-notification__close-icon" aria-label="close" width="10" height="10" viewBox="0 0 10 10" xmlns="http://www.w3.org/2000/svg">
-            <path d="M6.32 5L10 8.68 8.68 10 5 6.32 1.32 10 0 8.68 3.68 5 0 1.32 1.32 0 5 3.68 8.68 0 10 1.32 6.32 5z" fill-rule="nonzero"
-            />
-          </svg>
-        </button>
-      </div>
+      GENERIC_ERROR = -1;
+      FQDN_NOT_PROVIDED = -2;
+      INVALID_FQDN = -3;
 
-      <div id="loading" class="bx--loading-overlay">
-      <div data-loading class="bx--loading">
-        <svg class="bx--loading__svg" viewBox="-75 -75 150 150">
-          <title>Loading</title>
-          <circle class="bx--loading__stroke" cx="0" cy="0" r="37.5" />
-        </svg>
-      </div>
-      </div>
+      function checkFQDN(fqdn, callback) {
+        $.ajax({
+            url : '/check',
+            type : 'GET',
+            data : {
+                'fqdn' : fqdn
+            },
+            dataType : 'json',
+            success : function(data) {
+              if (data) {
+                callback(data.result, data.fqdn, data.port);
+              } else {
+                callback(GENERIC_ERROR, fqdn, 0);
+              }
+            },
+            error : function(request,error) {
+                callback(GENERIC_ERROR, fqdn, 0);
+            }
+        });
+      }
 
-      <script>
-          function show_loading() {
-            $("#loading").show();
+      $("#check").click(function() {
+        fqdn = $("#fqdn").val();
+        if (!isValidFQDN(fqdn)) {
+          return;
+        }
+        preChecking();
+        checkFQDN(fqdn, function (result, fqdn, port) {
+          switch (result) {
+            case OMI_EXPOSED_BUT_NOT_VULNERABLE:
+              updateResult('warning',`Your machine ${fqdn} exposes OMI on port ${port} but it is not vulnerable: it is recommended to not expose it and review your Network Security Group, unless you have a good reason to do so and you know what you are doing.`);
+              break;
+
+            case OMI_EXPOSED_AND_VULNERABLE: // vulnerable
+              updateResult('error',`Your machine ${fqdn} exposes OMI on port ${port} and is vulnerable! It is recommended to patch immediately and also review your Network Security Group, unless you have a good reason to do so and you know what you are doing.`);
+              break;
+
+            default: // don't known
+              updateResult('info',`Your machine ${fqdn} is not reachable or does not expose OMI on any port.`);
+              break;
           }
-          function hide_loading() {
-            $("#loading").hide();
-          }
-          function set_progress() {
-          }
-
-          function check_url() {
-
-          }
-
-          $("#check").click(function() {
-            $("#check").prop('disabled',true);
-            set_progress(0);
-            alert('test');
-          });
-
-          hide_loading();
-      </script>
-    </div>
+          postChecking();
+        });
+      });
+    </script>
   </body>
 </html>
