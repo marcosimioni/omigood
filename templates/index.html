@@ -27,22 +27,35 @@
     <form id="the-form">
       <div class="wrapper" style="background: white;">
         <div class="bx--form-item">
+            <p><b>OMIGOD! OM I GOOD??</b></p>
             <p>
-              The Wiz Research Team recently found four critical vulnerabilities in OMI, which is one of Azure's most ubiquitous yet least known software agents and is deployed on a large portion of Linux VMs in Azure.
+              The Wiz threat research team recently found four critical vulnerabilities in OMI, which is one of Azure's most ubiquitous yet least known software agents and is automatically deployed on a large portion of Linux VMs in Azure.
             </p>
             <p>
-              The vulnerabilities are very easy to exploit, allowing attackers to remotely execute arbitrary code within the network with a single request and escalate to root privileges.
+              The vulnerabilities are very easy to exploit and one of them (CVE-2021-38647), may allow attackers to remotely execute arbitrary code remotely with root privileges.
             </p>
             <p>
-              For more informations, please visit the <a href="https://www.wiz.io/blog/omigod-critical-vulnerabilities-in-omi-azure">blog post</a> published by the Wiz Research Team as well as the <a href="https://msrc.microsoft.com/update-guide/vulnerability/CVE-2021-38647">update guide</a> released by Microsoft.
+              For more information, please visit the <a href="https://www.wiz.io/blog/omigod-critical-vulnerabilities-in-omi-azure">blog post</a> published by the Wiz threat research as well as the <a href="https://msrc.microsoft.com/update-guide/vulnerability/CVE-2021-38647">update guide</a> released by Microsoft.
             </p>
             <p>
               Please note this page and its associated tools are not affiliated with Wix nor Microsoft.
             </p>
+            <p>
+              It has already been reported that this vulnerability is being exploited in the wild. Organizations should quickly patch your Linux VMs on Azure if they are exposing the OMI service over HTTP/HTTPS. As it might be difficult to quickly determine which machines are at risk in your organization, we developed a few tools to help.
+            </p>
+            <p>
+              First, this web page, that will check, given an IP address or hostname, whether the OMI server is listening on ports 1270,5985,5986. It will try to connect to the machine and execute a command (id) to test whether the system is vulnerable: we are not storing any logs of the machines scanned.
+            </p>
+            <p>
+              We also released <a href="https://github.com/marcosimioni/omigood">OM I Good?</a>, a simple yet powerful python script that uses Azure APIs  to enumerate your Linux VMs report whether they might be vulnerable.
+            </p>
+            <p>
+              For questions, please open an issue on GitHub.
+            </p>
         </div>
         <div class="bx--form-item">
             <p>
-              If you want to know if your Linux VM is vulnerabile, enter the IP address or URL below and press the "Check now" button.
+              If you want to know if your Linux VM is vulnerable from the Internet, enter the IP address or host name below and press the "Check now" button.
             </p>
         </div>
         <div class="bx--form-item">
