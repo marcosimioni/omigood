@@ -7,6 +7,7 @@ import socket
 import threading
 
 from flask import Flask, render_template, request, jsonify
+from flask_talisman import Talisman
 
 from omicheck import omi_check
 
@@ -14,6 +15,7 @@ logging.basicConfig(level='DEBUG')
 LOGGER = logging.getLogger(__name__)
 
 app = Flask(__name__)
+Talisman(app)
 
 DONT_KNOW = 0
 OMI_EXPOSED_BUT_NOT_VULNERABLE = 1
