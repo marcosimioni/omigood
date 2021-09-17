@@ -59,11 +59,6 @@ def check():
     """
     Checks if the provided fqdn is vulnerable to CVE-2021-38647.
     """
-    res = {
-        'result':-1,
-        'fqdn':'',
-        'port':0
-    }
     if "fqdn" not in request.args:
         return jsonify({
             'result':FQDN_NOT_PROVIDED,
@@ -72,12 +67,14 @@ def check():
         })
 
     fqdn = request.args['fqdn']
+    LOGGER.debug("Validating %s...", fqdn)
     if not is_valid_fqdn(fqdn):
         return jsonify({
             'result':INVALID_FQDN,
             'fqdn':'',
             'port':0
         })
+    LOGGER.debug("...valid fqdn!", fqdn)
 
     protocol = 'http'
     port = 5985
