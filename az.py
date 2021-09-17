@@ -3,12 +3,13 @@ import logging
 import re
 import argparse
 import traceback
+from typing import Dict, List, Optional, Any
+
 from azure.identity import AzureCliCredential
 from azure.mgmt.resource import SubscriptionClient, ResourceManagementClient
 from azure.mgmt.compute import ComputeManagementClient
 from azure.mgmt.network import NetworkManagementClient
 import pandas as pd
-from typing import Dict, List, Optional, Any
 
 LOG_FORMAT = "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
 logger = logging.getLogger("omigood")
@@ -24,11 +25,11 @@ MIN_PATCHED_OMI_VERSION = "1.6.8.1"
 
 BASH_SCRIPT = """
 #!/bin/bash
-MINVER=1.6.8.1
+MINVERSION=1.6.8.1
 REGEX="OMI\-([0-9\.]*)\-"
 
 # https://stackoverflow.com/questions/4023830/how-to-compare-two-strings-in-dot-separated-version-format-in-bash
-vercomp () {
+version_compare () {
     if [[ $1 == $2 ]]
     then
         return 0
@@ -76,7 +77,7 @@ else
 fi
 echo -n "OMI version: $omi..."
 
-vercomp $MINVER $omi
+version_compare $MINVERSION $omi
 case $? in
         0) op=0;;
         1) op=1;;
@@ -111,7 +112,6 @@ def run_script_on_vm(
     logger.info(f"Running Shell script on VM {vm_name} to determine OMI status...")
     params = {"command_id": "RunShellScript", "script": script.split("\n")}
     poller = cm.virtual_machines.begin_run_command(resource_group_name, vm_name, params)
-    ### TODO: must support asyncio for concurrency
     result = poller.result()
     if not result or not result.value or not result.value[0].message:
         logger.error(f"Cannot get result after running script on VM: {vm_name}")
@@ -137,10 +137,10 @@ def retrieve_vm_extensions(
     return vm_ext.value
 
 
-def merge_str_list(s: Optional[str], l: Optional[List[str]]) -> str:
-    if s and s not in l:
-        l.append(s)
-    return ",".join(list(set(l)))
+def merge_str_list(s: str, lst: List[str]) -> str:
+    if s and s not in lst:
+        lst.append(s)
+    return ",".join(list(set(lst)))
 
 
 def print_rules(rules: List[Dict[str, Any]], header: str) -> str:
@@ -150,14 +150,18 @@ def print_rules(rules: List[Dict[str, Any]], header: str) -> str:
 
     output_str += f"{header}:\n"
     for rule in rules:
-        output_str += f'\t{rule.get("direction")} {rule.get("protocol")} {rule.get("access")} from {rule.get("source_addr")} ports {rule.get("source_port")} to {rule.get("dest_addr")} ports {rule.get("dest_port")}\n'
+        output_str += (
+            f'\t{rule.get("direction")} {rule.get("protocol")} '
+            f' {rule.get("access")} from {rule.get("source_addr")} ports '
+            f'{rule.get("source_port")} to {rule.get("dest_addr")} ports {rule.get("dest_port")}\n'
+        )
     return output_str
 
 
 def check_nsg(
     nm: NetworkManagementClient, nsg_id: str, vm_name: str
 ) -> Optional[List[Dict[str, Any]]]:
-    output_rules = []
+    output_rules: List[Any] = []
     if not nsg_id:
         return output_rules
 
@@ -170,7 +174,10 @@ def check_nsg(
     )
     if not nsg or not nsg.security_rules:
         logger.error(
-            f'Cannot retrieve NSG datails or no rules available for NSG {nsg_info.get("resource_name")} on resourceGroup {nsg_info.get("resource_group_name")} for VM {vm_name}'
+            (
+                f'Cannot retrieve NSG datails or no rules available for NSG {nsg_info.get("resource_name")} '
+                f'on resourceGroup {nsg_info.get("resource_group_name")} for VM {vm_name}'
+            )
         )
         return output_rules
     for rule in nsg.security_rules:
@@ -199,7 +206,7 @@ def check_nsg(
 def check_effective_security_rules(
     nm: NetworkManagementClient, interface_info: Dict[str, str], vm_name: str
 ) -> Optional[List[Dict[str, Any]]]:
-    output_rules = []
+    output_rules: List[Any] = []
     logger.debug(
         f'Getting effective security rules for interface {interface_info.get("resource_name")} for VM {vm_name}'
     )
@@ -255,7 +262,8 @@ def check_vm_netsec(
             logger.error(f"Cannot parse Interface ID: {intf.id}, skipping")
             continue
         logger.debug(
-            f'Found network interface on VM {vm_name} named {interface_info.get("resource_name")} on resourceGroup {interface_info.get("resource_group_name")}'
+            f'Found network interface on VM {vm_name} named {interface_info.get("resource_name")}'
+            f' on resourceGroup {interface_info.get("resource_group_name")}'
         )
         network_interface = nm.network_interfaces.get(
             interface_info.get("resource_group_name"),
@@ -264,7 +272,8 @@ def check_vm_netsec(
 
         if not network_interface or not network_interface.ip_configurations:
             logger.debug(
-                f'Cannot retrieve information for network interface {interface_info.get("resource_name")} on VM {vm_name}'
+                f'Cannot retrieve information for network interface {interface_info.get("resource_name")}'
+                f" on VM {vm_name}"
             )
             continue
         vm_interface["mac_address"] = network_interface.mac_address
@@ -288,7 +297,8 @@ def check_vm_netsec(
                     )
                     if not public_ip:
                         logger.error(
-                            f'VM {vm_name} on interface {interface_info.get("interface_name")} has public IP assigned ({public_ip_info.get("resource_name")}), but cannot retrieve its information'
+                            f'VM {vm_name} on interface {interface_info.get("interface_name")} has public IP'
+                            f' assigned ({public_ip_info.get("resource_name")}), but cannot retrieve its information'
                         )
                     else:
                         intf_config_string += (
@@ -316,9 +326,6 @@ def check_vm_netsec(
             intf_config_string += print_rules(
                 vm_interface["effective_rules"], "Effective Security Rules"
             )
-        logger.debug(
-            f'Output from get_effective_security_rules on VM {vm_name}: {",".join([json.dumps(a.__dict__) for a in result.value[0].effective_security_rules])}'
-        )
         logger.info(intf_config_string)
         vm_interfaces.append(vm_interface)
     return vm_interfaces
@@ -350,7 +357,10 @@ def main():
     parser.add_argument(
         "-r",
         "--runscript",
-        help="[OPTIONAL] Run Script. Runs bash script on target VMs to check for OMI server, agent and version. Disabled by default. Use at your own risk.",
+        help=(
+            "[OPTIONAL] Run Script. Runs bash script on target VMs to check for OMI server"
+            ", agent and version. Disabled by default. Use at your own risk."
+        ),
         action="store_true",
     )
     parser.add_argument(
@@ -362,19 +372,23 @@ def main():
     parser.add_argument(
         "-e",
         "--effective",
-        help="[OPTIONAL] Check Effective Security Rules. Disabled by default. Requires more permissins on Azure.",
+        help=(
+            "[OPTIONAL] Check Effective Security Rules. Disabled by default."
+            " Requires more permissins on Azure."
+        ),
         action="store_true",
     )
     parser.add_argument(
         "-s",
         "--subscriptions",
-        help=f"[OPTIONAL] Comma separate list of subscriptions IDs. If not specified, it will try all.",
+        help="[OPTIONAL] Comma separate list of subscriptions IDs. If not specified, it will try all.",
         type=str,
     )
     parser.add_argument(
         "-g",
         "--resourcegroups",
-        help="[OPTIONAL] Comma separated list of Resource Group names. If not specified, it will try all. If specified, it will work only with a single subscription provided.",
+        help="[OPTIONAL] Comma separated list of Resource Group names. If not specified,"
+        " it will try all. If specified, it will work only with a single subscription provided.",
         type=str,
     )
     parser.add_argument(
