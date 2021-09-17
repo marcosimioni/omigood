@@ -17,6 +17,16 @@ logging.basicConfig(level='DEBUG')
 LOGGER = logging.getLogger(__name__)
 
 app = Flask(__name__)
+
+csp = {
+    'default-src': '\'self\' *.unpkg.com',
+    'img-src': '*',
+    'media-src': [
+        'media1.com',
+        'media2.com',
+    ],
+    'script-src': '*.googleapis.com'
+}
 Talisman(app) # comment this out when running in localhost for now
 
 RECAPTCHA_SITE_KEY = os.getenv('RECAPTCHA_SITE_KEY', None)
