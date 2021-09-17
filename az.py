@@ -4,7 +4,7 @@ import re
 import argparse
 import traceback
 from typing import Dict, List, Optional, Any
-
+from packaging import version
 from azure.identity import AzureCliCredential
 from azure.mgmt.resource import SubscriptionClient, ResourceManagementClient
 from azure.mgmt.compute import ComputeManagementClient
@@ -25,71 +25,34 @@ MIN_PATCHED_OMI_VERSION = "1.6.8.1"
 
 BASH_SCRIPT = """
 #!/bin/bash
-MINVERSION=1.6.8.1
-REGEX="OMI\-([0-9\.]*)\-"
-
-# https://stackoverflow.com/questions/4023830/how-to-compare-two-strings-in-dot-separated-version-format-in-bash
-version_compare () {
-    if [[ $1 == $2 ]]
-    then
-        return 0
-    fi
-    local IFS=.
-    local i ver1=($1) ver2=($2)
-    # fill empty fields in ver1 with zeros
-    for ((i=${#ver1[@]}; i<${#ver2[@]}; i++))
-    do
-        ver1[i]=0
-    done
-    for ((i=0; i<${#ver1[@]}; i++))
-    do
-        if [[ -z ${ver2[i]} ]]
-        then
-            # fill empty fields in ver2 with zeros
-            ver2[i]=0
-        fi
-        if ((10#${ver1[i]} > 10#${ver2[i]}))
-        then
-            return 1
-        fi
-        if ((10#${ver1[i]} < 10#${ver2[i]}))
-        then
-            return 2
-        fi
-    done
-    return 0
-}
+if [ ! "$BASH_VERSION" ] ; then
+    exec /bin/bash "$0" "$@"
+fi
+REGEX="OMI\\-([0-9\\.]*)\\-"
 
 OMIPATH="/opt/omi/bin/omiserver"
 if ! [[ -x $OMIPATH ]]; then
-        echo "OMI not found"
-        exit 0
+        echo "OMI VERSION: Not Found"
+        exit
 fi
 OMIVERSION=$($OMIPATH --version)
 
-
 if ! [[ $OMIVERSION =~ $REGEX ]];
 then
-        echo "Cannot detect OMI version"
-        exit 2
+        echo "OMI VERSION: Cannot Detect"
+        exit
 else
         omi=${BASH_REMATCH[1]}
 fi
-echo -n "OMI version: $omi..."
-
-version_compare $MINVERSION $omi
-case $? in
-        0) op=0;;
-        1) op=1;;
-        2) op=0;;
-esac
-
-if [[ $op == 1 ]]; then
-        echo "VULNERABLE!"
+echo "OMI VERSION: $omi"
+OMILISTEN=$(netstat -anp | grep omiengine | grep LISTEN | egrep "^tcp")
+if [[ -z "$OMILISTEN" ]];
+then
+        echo "OMI LISTENING ON TCP: NO"
 else
-        echo "OK!"
+        echo "OMI LISTENING ON TCP: YES"
+        echo "$OMILISTEN"
 fi
-exit $op
 """
 
 
@@ -109,7 +72,7 @@ def run_script_on_vm(
     cm: ComputeManagementClient, resource_group_name: str, vm_name: str, script: str
 ) -> str:
     # Run the script
-    logger.info(f"Running Shell script on VM {vm_name} to determine OMI status...")
+    logger.info(f"Running shell script on VM {vm_name} to determine OMI version and status...")
     params = {"command_id": "RunShellScript", "script": script.split("\n")}
     poller = cm.virtual_machines.begin_run_command(resource_group_name, vm_name, params)
     result = poller.result()
@@ -457,19 +420,6 @@ def main():
                             nm, r.name, vm.network_profile, args.effective
                         )
                     vm_extensions = retrieve_vm_extensions(cm, rg.name, r.name)
-                    if args.runscript:
-                        message = run_script_on_vm(cm, rg.name, r.name, BASH_SCRIPT)
-                        if "VULNERABLE" in message:
-                            logger.info("MACHINE IS VULNERABLE!")
-                        else:
-                            logger.info("MACHINE IS NOT VULNERABLE")
-                    if args.attack:
-                        vulnerable = attack_vm(r.name, vm_interfaces)
-                        if vulnerable:
-                            logger.info("MACHINE IS VULNERABLE")
-                        else:
-                            logger.info("MACHINE IS NOT VULNERABLE")
-
                     vm_item = {
                         "vm_name": r.name,
                         "vm_id": r.id,
@@ -478,6 +428,43 @@ def main():
                         "subscription_name": s.display_name,
                         "vm_extensions": ",".join([x.name for x in vm_extensions]),
                     }
+                    if args.runscript:
+                        message = run_script_on_vm(cm, rg.name, r.name, BASH_SCRIPT)
+                        regex = r"OMI VERSION: /(.+)\n"
+                        m = re.search(regex, message)
+                        if not m:
+                            logger.error(f'Cannot determine OMI version number: {message}')
+                        else:
+                            omi_version = version.parse(m.groups(1))
+                            vm_item['omi_version'] = m.groups(1)
+                            if omi_version < version.parse(MIN_PATCHED_OMI_VERSION):
+                                logger.info(f'VM {r.name} is VULNERABLE')
+                                vm_item['vulnerable'] = 'YES'
+                                vm_item['script_output'] = message
+                            else:
+                                vm_item['vulnerable'] = 'NO'
+                        regex = r"OMI LISTENING ON TCP: (.+)\n"
+                        m = re.search(regex, message)
+                        if not m:
+                            logger.error(f'Cannot determine whether OMI is listening on TCP: {message}')
+                        else:
+                            if m.groups(1) == 'NO':
+                                logger.info(f'OMI is NOT listening on TCP, good news!')
+                                vm_item['listening_on_tcp'] = 'YES'
+                            elif m.groups(1) == 'YES':
+                                logger.info(f'OMI IS listening to TCP: {message}')
+                                vm_item['listening_on_tcp'] = 'YES'
+                                vm_item['script_output'] = message
+                            else:
+                                vm_item['listening_on_tcp'] = 'UNKNOWN'
+                    if args.attack:
+                        vulnerable = attack_vm(r.name, vm_interfaces)
+                        if vulnerable:
+                            logger.info("MACHINE IS VULNERABLE")
+                        else:
+                            logger.info("MACHINE IS NOT VULNERABLE")
+
+
                     if args.output:
                         for idx, ifx in enumerate(vm_interfaces):
                             vm_item[f"if{idx}-id"] = ifx["interface_id"]
