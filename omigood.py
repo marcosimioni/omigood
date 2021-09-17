@@ -42,7 +42,7 @@ OMI_EXPOSED_BUT_NOT_VULNERABLE = 1
 OMI_EXPOSED_AND_VULNERABLE = 2
 
 # error code
-CHEK_SUCCESSFUL = 0
+CHECK_SUCCESSFUL = 0
 GENERIC_ERROR = -1
 FQDN_NOT_PROVIDED = -2
 INVALID_FQDN = -3
@@ -136,7 +136,7 @@ def check():
             report[str(port)] = OMI_EXPOSED_AND_VULNERABLE
 
     return jsonify({
-        'result':CHEK_SUCCESSFUL,
+        'result':CHECK_SUCCESSFUL,
         'fqdn':'',
         'report': report
     })
