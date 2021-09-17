@@ -3,12 +3,32 @@ Helper module for checking if an endpoint is vulnerable to CVE-2021-38647.
 """
 import logging
 import requests
+import sys
 from urllib3.exceptions import InsecureRequestWarning
+
+VERSION = "0.1"
+AUTHORS = "Made with <3 by FV and MS"
 
 logging.basicConfig(level='DEBUG')
 LOGGER = logging.getLogger(__name__)
 
-def omi_check(url):
+# port status
+DONT_KNOW = 0
+OMI_EXPOSED_BUT_NOT_VULNERABLE = 1
+OMI_EXPOSED_AND_VULNERABLE = 2
+
+class bcolors:
+    HEADER = '\033[95m'
+    OKBLUE = '\033[94m'
+    OKCYAN = '\033[96m'
+    OKGREEN = '\033[92m'
+    WARNING = '\033[93m'
+    FAIL = '\033[91m'
+    ENDC = '\033[0m'
+    BOLD = '\033[1m'
+    UNDERLINE = '\033[4m'
+
+def omi_check_url(url):
     """
     Checks if the endpoint is vulnerabile.
     Returns:
@@ -66,15 +86,73 @@ def omi_check(url):
         LOGGER.error(e)
         return -1
 
+def omi_check(fqdn):
+
+    PORTS_TO_TEST = [
+        ('https', '1270'),
+        ('http', '5985'),
+        ('https', '5986')
+    ]
+
+    report = {}
+    for PORT_TO_TEST in PORTS_TO_TEST:
+        protocol = PORT_TO_TEST[0]
+        port = PORT_TO_TEST[1]
+
+        LOGGER.debug("Checking %s on %s port %s...", fqdn, protocol, port)
+
+        url = f'{protocol}://{fqdn}:{port}'
+        res = omi_check_url(url)
+
+        if res == -1:
+            LOGGER.debug("...%s on http port %s is not reachable.", fqdn, port)
+            report[str(port)] = DONT_KNOW
+
+        elif res == 0:
+            LOGGER.debug("...%s on http port %s is reachable but not vulnerable!", fqdn, port)
+            report[str(port)] = OMI_EXPOSED_BUT_NOT_VULNERABLE
+
+        elif res == 1:
+            LOGGER.debug("...%s on http port %s is vulnerable!", fqdn, port)
+            report[str(port)] = OMI_EXPOSED_AND_VULNERABLE
+
+    return report
+
 if __name__ == "__main__":
-    PROTOCOL = 'http'
-    HOST = '40.127.110.197'
-    PORT = '5985'
 
-    URL = f"{PROTOCOL}://{HOST}:{PORT}"
-    RES = omi_check(URL)
+    print (r"""  ___  __  __   ___    ____  ___   ___  ____ ___
+ / _ \|  \/  | |_ _|  / ___|/ _ \ / _ \|  _ \__ \
+| | | | |\/| |  | |  | |  _| | | | | | | | | |/ /
+| |_| | |  | |  | |  | |_| | |_| | |_| | |_| |_|
+ \___/|_|  |_| |___|  \____|\___/ \___/|____/(_)"""
+    )
+    print()
+    print(f"Version {VERSION}")
+    print()
+    print(AUTHORS)
+    print()
 
-    if RES:
-        print(f"{URL} is vulnerable!")
-    else:
-        print(f"Congrats, {URL} seems to be ok.")
+    if len(sys.argv) < 2:
+        print ("Usage:")
+        print ("    omicheck.py <ip_address_or_fqdn>")
+        print ()
+        sys.exit()
+
+    fqdn = sys.argv[1]
+
+    print(f"Checking fqdn: {fqdn}")
+
+    report = omi_check(fqdn)
+
+    for port in report:
+        if report[port] == DONT_KNOW:
+            print(f"Port {port} on {fqdn} is not expose, or the host is not reachable.")
+            print()
+        elif report[port] == OMI_EXPOSED_BUT_NOT_VULNERABLE:
+            print(f"{bcolors.WARNING} {fqdn} exposes OMI on port {port} but it is not vulnerable: it is recommended to review your Network Security Group, unless you have a good reason to not do so and you know what you are doing.")
+            print()
+        elif report[port] == OMI_EXPOSED_AND_VULNERABLE:
+            print(f"{bcolors.FAIL} exposes a vulnerable OMI on port {port}: it is recommended to patch immediately and also to review your Network Security Group, unless you have a good reason to not do so and you know what you are doing.")
+            print()
+
+    print("All done.")

@@ -11,7 +11,8 @@ from flask import Flask, render_template, request, jsonify
 from flask_recaptcha import ReCaptcha
 from flask_talisman import Talisman
 
-from omicheck import omi_check
+from omicheck import omi_check, DONT_KNOW, OMI_EXPOSED_BUT_NOT_VULNERABLE, OMI_EXPOSED_AND_VULNERABLE
+
 
 logging.basicConfig(level='DEBUG')
 LOGGER = logging.getLogger(__name__)
@@ -35,11 +36,6 @@ if not RECAPTCHA_SECRET_KEY:
 app.config['RECAPTCHA_SECRET_KEY'] = '6LcGR3McAAAAACeO1zu9i31sjYGqPh3bBSh8WIuW'
 
 recaptcha = ReCaptcha(app)
-
-# port status
-DONT_KNOW = 0
-OMI_EXPOSED_BUT_NOT_VULNERABLE = 1
-OMI_EXPOSED_AND_VULNERABLE = 2
 
 # error code
 CHECK_SUCCESSFUL = 0
@@ -107,33 +103,7 @@ def check():
 
     LOGGER.debug("...valid fqdn!")
 
-    PORTS_TO_TEST = [
-        ('https', '1270'),
-        ('http', '5985'),
-        ('https', '5986')
-    ]
-
-    report = {}
-    for PORT_TO_TEST in PORTS_TO_TEST:
-        protocol = PORT_TO_TEST[0]
-        port = PORT_TO_TEST[1]
-
-        LOGGER.debug("Checking %s on %s port %s...", fqdn, protocol, port)
-
-        url = f'{protocol}://{fqdn}:{port}'
-        res = omi_check(url)
-
-        if res == -1:
-            LOGGER.debug("...%s on http port %s is not reachable.", fqdn, port)
-            report[str(port)] = DONT_KNOW
-
-        elif res == 0:
-            LOGGER.debug("...%s on http port %s is reachable but not vulnerable!", fqdn, port)
-            report[str(port)] = OMI_EXPOSED_BUT_NOT_VULNERABLE
-
-        elif res == 1:
-            LOGGER.debug("...%s on http port %s is vulnerable!", fqdn, port)
-            report[str(port)] = OMI_EXPOSED_AND_VULNERABLE
+    report = omi_check(fqdn)
 
     return jsonify({
         'result':CHECK_SUCCESSFUL,
