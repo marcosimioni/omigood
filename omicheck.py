@@ -1,11 +1,20 @@
 """
 Helper module for checking if an endpoint is vulnerable to CVE-2021-38647.
 """
+import logging
 import requests
+from urllib3.exceptions import InsecureRequestWarning
+
+logging.basicConfig(level='DEBUG')
+LOGGER = logging.getLogger(__name__)
 
 def omi_check(url):
     """
     Checks if the endpoint is vulnerabile.
+    Returns:
+    -1 if the url is not reachable
+    0 if the url is reachable but not vulnerable
+    1 if the url is reachable and vulnerable
     """
 
     uri = f"{url}/wsman"
@@ -42,12 +51,24 @@ def omi_check(url):
         'User-Agent': 'Microsoft WinRM Client'
     }
 
-    response = requests.post(uri, data=body, headers=headers,  timeout=10)
+    try:
+        LOGGER.debug(f"Testing {uri}...")
 
-    if response.status_code == 200:
-        return True
+        # Suppress only the single warning from urllib3 needed.
+        requests.packages.urllib3.disable_warnings(category=InsecureRequestWarning)
 
-    return False
+        # Set `verify=False` on `requests.post`.
+        requests.post(url='https://example.com', data={'bar':'baz'}, verify=False)
+
+        response = requests.post(uri, data=body, headers=headers,  timeout=10)
+        LOGGER.debug(f"Received status_code={response.status_code}")
+        if response.status_code == 200:
+            return 1
+        else:
+            return 0
+    except Exception as e:
+        LOGGER.error(e)
+        return -1
 
 if __name__ == "__main__":
     PROTOCOL = 'http'

@@ -106,14 +106,17 @@
         return grecaptcha && grecaptcha.getResponse().length !== 0;
       }
 
-      DONT_KNOW = 0;
-      OMI_EXPOSED_BUT_NOT_VULNERABLE = 1;
-      OMI_EXPOSED_AND_VULNERABLE = 2;
+      // error code
+      CHEK_SUCCESSFUL = 0
+      GENERIC_ERROR = -1
+      FQDN_NOT_PROVIDED = -2
+      INVALID_FQDN = -3
+      CAPTCHA_ERROR = -999
 
-      GENERIC_ERROR = -1;
-      FQDN_NOT_PROVIDED = -2;
-      INVALID_FQDN = -3;
-      CAPTCHA_ERROR = -999;
+      // port status
+      DONT_KNOW = 0
+      OMI_EXPOSED_BUT_NOT_VULNERABLE = 1
+      OMI_EXPOSED_AND_VULNERABLE = 2
 
       function checkFQDN(fqdn, callback) {
         $.ajax({
@@ -123,7 +126,7 @@
             dataType : 'json',
             success : function(data) {
               if (data) {
-                callback(data.result, data.fqdn, data.port);
+                callback(data.result, data.fqdn, data.report);
               } else {
                 callback(GENERIC_ERROR, fqdn, 0);
               }
@@ -147,22 +150,62 @@
         }
 
         preChecking();
-        checkFQDN(fqdn, function (result, fqdn, port) {
+        checkFQDN(fqdn, function (result, fqdn, report) {
+
+          // error code
+          CHEK_SUCCESSFUL = 0;
+          GENERIC_ERROR = -1;
+          FQDN_NOT_PROVIDED = -2;
+          INVALID_FQDN = -3;
+          CAPTCHA_ERROR = -999;
+
+          // port status
+          DONT_KNOW = 0;
+          OMI_EXPOSED_BUT_NOT_VULNERABLE = 1;
+          OMI_EXPOSED_AND_VULNERABLE = 2;
+
           switch (result) {
-            case OMI_EXPOSED_BUT_NOT_VULNERABLE:
-              updateResult('warning',`Your machine ${fqdn} exposes OMI on port ${port} but it is not vulnerable: it is recommended to not expose it and review your Network Security Group, unless you have a good reason to do so and you know what you are doing.`);
+            case GENERIC_ERROR:
+              updateResult('error',`A generic error occurred.`);
               break;
 
-            case OMI_EXPOSED_AND_VULNERABLE: // vulnerable
-              updateResult('error',`Your machine ${fqdn} exposes OMI on port ${port} and is vulnerable! It is recommended to patch immediately and also review your Network Security Group, unless you have a good reason to do so and you know what you are doing.`);
+            case FQDN_NOT_PROVIDED:
+              updateResult('error',`A fqdn was not provided.`);
+              break;
+
+            case INVALID_FQDN:
+              updateResult('error',`An invalid fqdn was provide.`);
               break;
 
             case CAPTCHA_ERROR:
               updateResult('error',`Please prove that you are not a robot.`);
               break;
 
+            case CHEK_SUCCESSFUL:
+              vulnerable_ports = "";
+              listening_ports = "";
+              for (var key in report) {
+                  if (report.hasOwnProperty(key)) {
+                      vuln = report[key];
+                      if (vuln == OMI_EXPOSED_BUT_NOT_VULNERABLE) {
+                        listening_ports=vulnerable_ports+","+key
+                      } else if (vuln == OMI_EXPOSED_AND_VULNERABLE) {
+                        vulnerable_ports=vulnerable_ports+","+key
+                      }
+                  }
+              }
+
+              if (vulnerable_ports != "") {
+                updateResult('error',`Your machine ${fqdn} exposes OMI on port(s) ${vulnerable_ports.substring(1)} and is vulnerable! It is recommended to patch immediately and also review your Network Security Group, unless you have a good reason to not do so and you know what you are doing.`);
+              } else if (listening_ports != "") {
+                updateResult('error',`Your machine ${fqdn} exposes OMI on port(s) ${listening_ports.substring(1)} but it is not vulnerable: it is recommended to review your Network Security Group, unless you have a good reason to not do so and you know what you are doing.`);
+              } else {
+                updateResult('info',`Your machine ${fqdn} is not reachable or does not expose OMI on any port.`);
+              }
+              break;
+
             default: // don't known
-              updateResult('info',`Your machine ${fqdn} is not reachable or does not expose OMI on any port.`);
+              updateResult('error',`A generic error occurred.`);
               break;
           }
           postChecking();

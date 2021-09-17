@@ -22,7 +22,7 @@ csp = {
     'default-src': '\'self\' \'unsafe-inline\' unpkg.com *.google.com *.gstatic.com',
     'script-src': '\'self\' \'unsafe-inline\' *.google.com *.googleapis.com *.gstatic.com'
 }
-Talisman(app, content_security_policy=csp) # comment this out when running in localhost for now
+#Talisman(app, content_security_policy=csp) # comment this out when running in localhost for now
 
 RECAPTCHA_SITE_KEY = os.getenv('RECAPTCHA_SITE_KEY', None)
 if not RECAPTCHA_SITE_KEY:
@@ -36,10 +36,13 @@ app.config['RECAPTCHA_SECRET_KEY'] = '6LcGR3McAAAAACeO1zu9i31sjYGqPh3bBSh8WIuW'
 
 recaptcha = ReCaptcha(app)
 
+# port status
 DONT_KNOW = 0
 OMI_EXPOSED_BUT_NOT_VULNERABLE = 1
 OMI_EXPOSED_AND_VULNERABLE = 2
 
+# error code
+CHEK_SUCCESSFUL = 0
 GENERIC_ERROR = -1
 FQDN_NOT_PROVIDED = -2
 INVALID_FQDN = -3
@@ -59,23 +62,6 @@ def is_valid_fqdn(fqdn):
     except socket.gaierror:
         return False # not a valid hostname or ip address
 
-def check_omigod(protocol, fqdn, port):
-    """
-    Checks if the provided fqdn is vulnerable to CVE-2021-38647
-    on the provided protocol and port.
-    """
-
-    url = f'{protocol}://{fqdn}:{port}'
-    res = omi_check(url)
-    if res:
-        return {
-            'result':OMI_EXPOSED_AND_VULNERABLE,
-            'fqdn':fqdn,
-            'port':5986
-        }
-
-    return None
-
 @app.route('/check', methods=["POST"])
 def check():
     """
@@ -87,7 +73,7 @@ def check():
         return jsonify({
             'result':CAPTCHA_ERROR,
             'fqdn':'',
-            'port':0
+            'report':{}
         })
 
     if not recaptcha.verify():
@@ -95,7 +81,7 @@ def check():
         return jsonify({
             'result':CAPTCHA_ERROR,
             'fqdn':'',
-            'port':0
+            'report':{}
         })
 
     LOGGER.debug("...reCAPTCHA is good!")
@@ -107,7 +93,7 @@ def check():
         return jsonify({
             'result':FQDN_NOT_PROVIDED,
             'fqdn':'',
-            'port':0
+            'report':{}
         })
 
     fqdn = request.form['fqdn']
@@ -116,40 +102,44 @@ def check():
         return jsonify({
             'result':INVALID_FQDN,
             'fqdn':'',
-            'port':0
+            'report':{}
         })
 
-    LOGGER.debug("...valid fqdn!", fqdn)
+    LOGGER.debug("...valid fqdn!")
 
-    protocol = 'http'
-    port = 5985
-    LOGGER.debug("Checking %s on http port %s...", fqdn, port)
-    res = check_omigod(protocol, fqdn, port)
-    if res:
-        LOGGER.debug("...vulnerable!")
-        return res
+    PORTS_TO_TEST = [
+        ('https', '1270'),
+        ('http', '5985'),
+        ('https', '5986')
+    ]
 
-    protocol = 'https'
-    port = 5986
-    LOGGER.debug("Checking %s on http port %s...", fqdn, port)
-    res = check_omigod(protocol, fqdn, port)
-    if res:
-        LOGGER.debug("...vulnerable!")
-        return res
+    report = {}
+    for PORT_TO_TEST in PORTS_TO_TEST:
+        protocol = PORT_TO_TEST[0]
+        port = PORT_TO_TEST[1]
 
-    protocol = 'http'
-    port = 1270
-    LOGGER.debug("Checking %s on http port %s...", fqdn, port)
-    res = check_omigod(protocol, fqdn, port)
-    if res:
-        LOGGER.debug("...vulnerable!")
-        return res
+        LOGGER.debug("Checking %s on %s port %s...", fqdn, protocol, port)
 
-    return {
-        'result':DONT_KNOW,
-        'fqdn':fqdn,
-        'port':0
-    }
+        url = f'{protocol}://{fqdn}:{port}'
+        res = omi_check(url)
+
+        if res == -1:
+            LOGGER.debug("...%s on http port %s is not reachable.", fqdn, port)
+            report[str(port)] = DONT_KNOW
+
+        elif res == 0:
+            LOGGER.debug("...%s on http port %s is reachable but not vulnerable!", fqdn, port)
+            report[str(port)] = OMI_EXPOSED_BUT_NOT_VULNERABLE
+
+        elif res == 1:
+            LOGGER.debug("...%s on http port %s is vulnerable!", fqdn, port)
+            report[str(port)] = OMI_EXPOSED_AND_VULNERABLE
+
+    return jsonify({
+        'result':CHEK_SUCCESSFUL,
+        'fqdn':'',
+        'report': report
+    })
 
 @app.route('/', methods=["GET"])
 def index():
