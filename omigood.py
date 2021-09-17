@@ -8,7 +8,7 @@ import threading
 
 from flask import Flask, render_template, request, jsonify
 
-from omicheck import OmiCheck
+from omicheck import omi_check
 
 logging.basicConfig(level='DEBUG')
 LOGGER = logging.getLogger(__name__)
@@ -43,8 +43,8 @@ def check_omigod(protocol, fqdn, port):
     on the provided protocol and port.
     """
 
-    omi_check = OmiCheck(f'{protocol}://{fqdn}:{port}')
-    res = omi_check.check()
+    url = f'{protocol}://{fqdn}:{port}'
+    res = omi_check(url)
     if res:
         return {
             'result':OMI_EXPOSED_AND_VULNERABLE,
