@@ -9,7 +9,7 @@ from azure.identity import AzureCliCredential
 from azure.mgmt.resource import SubscriptionClient, ResourceManagementClient
 from azure.mgmt.compute import ComputeManagementClient
 from azure.mgmt.network import NetworkManagementClient
-
+import pandas as pd
 
 LOG_FORMAT = "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
 logger = logging.getLogger("omigood")
@@ -391,6 +391,9 @@ def main():
         " it will try all. If specified, it will work only with a single subscription provided.",
         type=str,
     )
+    parser.add_argument(
+        "-o", "--output", help="[OPTIONAL] CSV output file with results.", type=str
+    )
 
     try:
         args = parser.parse_args()
@@ -400,7 +403,7 @@ def main():
 
         credential = AzureCliCredential()
         subscription_client = SubscriptionClient(credential)
-
+        vm_list = []
         subs_to_check = []
         if args.subscriptions:
             subs_to_check = args.subscriptions.split(",")
@@ -448,6 +451,7 @@ def main():
                         continue  # not Linux
 
                     logger.info(f"Found Linux VM: {r.name} with id {r.id}")
+
                     if vm.network_profile:
                         vm_interfaces = check_vm_netsec(
                             nm, r.name, vm.network_profile, args.effective
@@ -465,6 +469,28 @@ def main():
                             logger.info("MACHINE IS VULNERABLE")
                         else:
                             logger.info("MACHINE IS NOT VULNERABLE")
+
+                    vm_item = {
+                        "vm_name": r.name,
+                        "vm_id": r.id,
+                        "rg_name": rg.name,
+                        "subscription_id": s.subscription_id,
+                        "subscription_name": s.display_name,
+                        "vm_extensions": ",".join([x.name for x in vm_extensions]),
+                    }
+                    if args.output:
+                        for idx, ifx in enumerate(vm_interfaces):
+                            vm_item[f"if{idx}-id"] = ifx["interface_id"]
+                            vm_item[f"if{idx}-mac"] = ifx["mac_address"]
+                            vm_item[f"if{idx}-ips"] = ifx["ip_configurations"]
+                            vm_item[f"if{idx}-rules"] = ifx.get("nsg_rules", None)
+                            vm_item[f"if{idx}-effective_rules"] = ifx.get(
+                                "effective_rules", None
+                            )
+                        vm_list.append(vm_item)
+        if args.output:
+            vm_df = pd.DataFrame(vm_list)
+            vm_df.to_csv(args.output)
 
     except Exception as e:
         logger.error(
