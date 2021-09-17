@@ -152,7 +152,7 @@ if __name__ == "__main__":
             print(f"{bcolors.WARNING} {fqdn} exposes OMI on port {port} but it is not vulnerable: it is recommended to review your Network Security Group, unless you have a good reason to not do so and you know what you are doing.")
             print()
         elif report[port] == OMI_EXPOSED_AND_VULNERABLE:
-            print(f"{bcolors.FAIL} exposes a vulnerable OMI on port {port}: it is recommended to patch immediately and also to review your Network Security Group, unless you have a good reason to not do so and you know what you are doing.")
+            print(f"{bcolors.FAIL} {fqdn} exposes a vulnerable OMI on port {port}: it is recommended to patch immediately and also to review your Network Security Group, unless you have a good reason to not do so and you know what you are doing.")
             print()
 
     print("All done.")
