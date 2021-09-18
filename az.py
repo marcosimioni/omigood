@@ -19,7 +19,6 @@ logger.addHandler(log_handler)
 logger.setLevel(logging.INFO)
 log_handler.setLevel(logging.INFO)
 
-
 OMI_SERVICES = ["http/5985", "https/5986", "https/1270"]
 MIN_PATCHED_OMI_VERSION = "1.6.8.1"
 
@@ -72,7 +71,9 @@ def run_script_on_vm(
     cm: ComputeManagementClient, resource_group_name: str, vm_name: str, script: str
 ) -> str:
     # Run the script
-    logger.info(f"Running shell script on VM {vm_name} to determine OMI version and status...")
+    logger.info(
+        f"Running shell script on VM {vm_name} to determine OMI version and status..."
+    )
     params = {"command_id": "RunShellScript", "script": script.split("\n")}
     poller = cm.virtual_machines.begin_run_command(resource_group_name, vm_name, params)
     result = poller.result()
@@ -211,6 +212,7 @@ def check_vm_netsec(
     vm_name: str,
     vm_network_profile: Any,
     check_effective: bool,
+    vm_power_status: str,
 ) -> Optional[List[Dict[str, Any]]]:
     if len(vm_network_profile.network_interfaces) == 0:
         logger.debug(f"Cannot get list of interfaces for VM: {vm_name}")
@@ -282,7 +284,7 @@ def check_vm_netsec(
                 vm_interface["nsg_rules"], "Network Security Rules"
             )
         # Effective Security Rules
-        if check_effective:
+        if check_effective and vm_power_status == "running":
             vm_interface["effective_rules"] = check_effective_security_rules(
                 nm, interface_info, vm_name
             )
@@ -409,6 +411,13 @@ def main():
                             f"Skipping VM {r.name}: cannot retrieve VM metadata"
                         )
                         continue
+                    vm_power_status = next(
+                        x.code.replace("PowerState/", "")
+                        for x in cm.virtual_machines.instance_view(
+                            rg.name, r.name
+                        ).statuses
+                        if "PowerState" in x.code
+                    )
                     if not vm.os_profile.linux_configuration:
                         logger.debug(f"Skipping VM {r.name}: not Linux")
                         continue  # not Linux
@@ -417,46 +426,55 @@ def main():
 
                     if vm.network_profile:
                         vm_interfaces = check_vm_netsec(
-                            nm, r.name, vm.network_profile, args.effective
+                            nm,
+                            r.name,
+                            vm.network_profile,
+                            args.effective,
+                            vm_power_status,
                         )
                     vm_extensions = retrieve_vm_extensions(cm, rg.name, r.name)
                     vm_item = {
                         "vm_name": r.name,
-                        "vm_id": r.id,
                         "rg_name": rg.name,
                         "subscription_id": s.subscription_id,
                         "subscription_name": s.display_name,
                         "vm_extensions": ",".join([x.name for x in vm_extensions]),
+                        "vm_power_status": vm_power_status,
+                        "vm_id": r.id,
                     }
                     if args.runscript:
                         message = run_script_on_vm(cm, rg.name, r.name, BASH_SCRIPT)
                         regex = r"OMI VERSION: /(.+)\n"
                         m = re.search(regex, message)
                         if not m:
-                            logger.error(f'Cannot determine OMI version number: {message}')
+                            logger.error(
+                                f"Cannot determine OMI version number: {message}"
+                            )
                         else:
                             omi_version = version.parse(m.groups(1))
-                            vm_item['omi_version'] = m.groups(1)
+                            vm_item["omi_version"] = m.groups(1)
                             if omi_version < version.parse(MIN_PATCHED_OMI_VERSION):
-                                logger.info(f'VM {r.name} is VULNERABLE')
-                                vm_item['vulnerable'] = 'YES'
-                                vm_item['script_output'] = message
+                                logger.info(f"VM {r.name} is VULNERABLE")
+                                vm_item["vulnerable"] = "YES"
+                                vm_item["script_output"] = message
                             else:
-                                vm_item['vulnerable'] = 'NO'
+                                vm_item["vulnerable"] = "NO"
                         regex = r"OMI LISTENING ON TCP: (.+)\n"
                         m = re.search(regex, message)
                         if not m:
-                            logger.error(f'Cannot determine whether OMI is listening on TCP: {message}')
+                            logger.error(
+                                f"Cannot determine whether OMI is listening on TCP: {message}"
+                            )
                         else:
-                            if m.groups(1) == 'NO':
-                                logger.info(f'OMI is NOT listening on TCP, good news!')
-                                vm_item['listening_on_tcp'] = 'YES'
-                            elif m.groups(1) == 'YES':
-                                logger.info(f'OMI IS listening to TCP: {message}')
-                                vm_item['listening_on_tcp'] = 'YES'
-                                vm_item['script_output'] = message
+                            if m.groups(1) == "NO":
+                                logger.info(f"OMI is NOT listening on TCP, good news!")
+                                vm_item["listening_on_tcp"] = "YES"
+                            elif m.groups(1) == "YES":
+                                logger.info(f"OMI IS listening to TCP: {message}")
+                                vm_item["listening_on_tcp"] = "YES"
+                                vm_item["script_output"] = message
                             else:
-                                vm_item['listening_on_tcp'] = 'UNKNOWN'
+                                vm_item["listening_on_tcp"] = "UNKNOWN"
                     if args.attack:
                         vulnerable = attack_vm(r.name, vm_interfaces)
                         if vulnerable:
@@ -464,10 +482,9 @@ def main():
                         else:
                             logger.info("MACHINE IS NOT VULNERABLE")
 
-
                     if args.output:
                         for idx, ifx in enumerate(vm_interfaces):
-                            vm_item[f"if{idx}-id"] = ifx["interface_id"]
+                            vm_item[f"if{idx}-id"] = ifx["interface_id"].split("/")[-1]
                             vm_item[f"if{idx}-mac"] = ifx["mac_address"]
                             vm_item[f"if{idx}-ips"] = ifx["ip_configurations"]
                             vm_item[f"if{idx}-rules"] = ifx.get("nsg_rules", None)
@@ -477,7 +494,7 @@ def main():
                         vm_list.append(vm_item)
         if args.output:
             vm_df = pd.DataFrame(vm_list)
-            vm_df.to_csv(args.output)
+            vm_df.to_csv(args.output, index=False)
 
     except Exception as e:
         logger.error(
