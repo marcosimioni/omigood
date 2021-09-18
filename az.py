@@ -5,11 +5,13 @@ import argparse
 import traceback
 from typing import Dict, List, Optional, Any
 from packaging import version
-from azure.identity import AzureCliCredential
+from azure.identity import AzureCliCredential,InteractiveBrowserCredential
 from azure.mgmt.resource import SubscriptionClient, ResourceManagementClient
 from azure.mgmt.compute import ComputeManagementClient
 from azure.mgmt.network import NetworkManagementClient
 import pandas as pd
+sys.path.append('.')
+from omicheck import OmiCheck
 
 LOG_FORMAT = "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
 logger = logging.getLogger("omigood")
@@ -21,7 +23,12 @@ log_handler.setLevel(logging.INFO)
 
 
 OMI_SERVICES = ["http/5985", "https/5986", "https/1270"]
+OMI_EXTENSIONS = ["OMSAgentForLinux"]
+
+OMI_PORTS = [int(service.split("/")[1]) for service in OMI_SERVICES]
+
 MIN_PATCHED_OMI_VERSION = "1.6.8.1"
+MIN_PATCHED_OMS_VERSION = "1.13.40"
 
 BASH_SCRIPT = """
 #!/bin/bash
@@ -72,7 +79,9 @@ def run_script_on_vm(
     cm: ComputeManagementClient, resource_group_name: str, vm_name: str, script: str
 ) -> str:
     # Run the script
-    logger.info(f"Running shell script on VM {vm_name} to determine OMI version and status...")
+    logger.info(
+        f"Running shell script on VM {vm_name} to determine OMI version and status..."
+    )
     params = {"command_id": "RunShellScript", "script": script.split("\n")}
     poller = cm.virtual_machines.begin_run_command(resource_group_name, vm_name, params)
     result = poller.result()
@@ -81,6 +90,36 @@ def run_script_on_vm(
     message = result.value[0].message
     logger.debug(f"Output from script on VM {vm_name}: {message}")
     return message
+
+
+"""
+ This function is simple and doesn't cover all cases.
+ It just checks whether there is an inbound rule that contains a TCP or * allow in a port/port range for OMI.
+ It doesn't check if such rules are shadowed by deny rules or the source IPs.
+"""
+def parse_rules(rules: List[Dict[str, Any]], ports: List[int]) -> bool:
+    allowed_protocols = ["TCP", "*", "Tcp", "All"]
+    if not rules:
+        return False
+    for r in rules:
+        if r.get("direction") != "Inbound":
+            continue
+        if r.get("protocol") not in allowed_protocols:
+            continue
+        if not (dest_port := r.get("dest_port")):
+            continue
+        for p in dest_port.split(","):
+            if p == "*" or p == "0-65535":
+                return True
+            if "-" in p:  # range
+                start, end = [int(a) for a in p.split("-", 2)]
+                if start > end:
+                    continue
+            else:
+                start = end = int(p)
+            if any(start <= n <= end for n in ports):
+                return True
+    return False
 
 
 def retrieve_vm_extensions(
@@ -93,7 +132,6 @@ def retrieve_vm_extensions(
     if len(vm_ext.value) == 0:
         logger.debug(f"VM {vm_name} has no Extensions")
         return []
-
     logger.debug(
         f'Extensions for VM {vm_name}: {",".join([x.name for x in vm_ext.value])}'
     )
@@ -278,6 +316,9 @@ def check_vm_netsec(
             vm_interface["nsg_rules"] = check_nsg(
                 nm, network_interface.network_security_group.id, vm_name
             )
+            vm_interface["check_permissive_rules"] = (
+                "YES" if parse_rules(vm_interface["nsg_rules"], OMI_PORTS) else "NO"
+            )
             intf_config_string += print_rules(
                 vm_interface["nsg_rules"], "Network Security Rules"
             )
@@ -286,10 +327,15 @@ def check_vm_netsec(
             vm_interface["effective_rules"] = check_effective_security_rules(
                 nm, interface_info, vm_name
             )
+            vm_interface["check_permissive_effective_rules"] = (
+                "YES"
+                if parse_rules(vm_interface["effective_rules"], OMI_PORTS)
+                else "NO"
+            )
             intf_config_string += print_rules(
                 vm_interface["effective_rules"], "Effective Security Rules"
             )
-        logger.info(intf_config_string)
+        logger.debug(intf_config_string)
         vm_interfaces.append(vm_interface)
     return vm_interfaces
 
@@ -305,7 +351,9 @@ def attack_vm(vm_name: str, vm_interfaces: List[Dict[str, Any]]) -> bool:
                 logger.info(
                     f"Trying to attack {vm_name} on IP {target_ip} on {proto}/{port}"
                 )
-                # do the attack
+                check = OmiCheck(target_ip, str(port))
+                if check.check():
+                    return True
     return False
 
 
@@ -316,6 +364,12 @@ def main():
         "--verbose",
         help="[OPTIONAL] Verbose mode: Displays additional debug details.",
         action="store_true",
+    )
+    parser.add_argument(
+        "--auth",
+        help="Authentication mode. Default: azurecli.",
+        choices=["azurecli", "interactivebrowser"],
+        default="azurecli"
     )
     parser.add_argument(
         "-r",
@@ -364,7 +418,13 @@ def main():
             logger.setLevel(logging.DEBUG)
             log_handler.setLevel(logging.DEBUG)
 
-        credential = AzureCliCredential()
+        if args.auth == 'azurecli':
+            credential = AzureCliCredential()
+        elif args.auth == 'interactivebrowser':
+            credential = InteractiveBrowserCredential()
+        else:
+            raise ValueError('Azure authentication mode not supported')
+
         subscription_client = SubscriptionClient(credential)
         vm_list = []
         subs_to_check = []
@@ -415,6 +475,24 @@ def main():
 
                     logger.info(f"Found Linux VM: {r.name} with id {r.id}")
 
+                    vm_state = cm.virtual_machines.instance_view(rg.name, r.name)
+                    vm_power_state = ''
+                    vm_oms_version = ''
+                    if not vm_state:
+                        logger.warn(
+                            f'Cannot retrieve instante view for VM {r.name}!'
+                        )
+                    if vm_state.statuses and isinstance(vm_state.statuses, list):
+                        for status in vm_state.statuses:
+                            if status.code.startswith('PowerState'):
+                                vm_power_state = status.code.split('/')[1]
+                    if vm_state.vm_agent and vm_state.vm_agent.extension_handlers and isinstance(vm_state.vm_agent.extension_handlers, list):
+                        for xha in vm_state.vm_agent.extension_handlers:
+                            if 'OmsAgentForLinux' not in xha.type:
+                                continue
+                            vm_oms_version = xha.type_handler_version
+
+                    vm_interfaces: List[Dict[str, Any]] = []
                     if vm.network_profile:
                         vm_interfaces = check_vm_netsec(
                             nm, r.name, vm.network_profile, args.effective
@@ -426,58 +504,89 @@ def main():
                         "rg_name": rg.name,
                         "subscription_id": s.subscription_id,
                         "subscription_name": s.display_name,
+                        "vm_interfaces": vm_interfaces,
+                        'computer_name': vm_state.computer_name if vm_state else 'UNKNOWN',
+                        'os_name': vm_state.os_name if vm_state else 'UNKNOWN',
+                        'os_version': vm_state.os_version if vm_state else 'UNKNOWN',
                         "vm_extensions": ",".join([x.name for x in vm_extensions]),
+                        'power_state': vm_power_state,
+                        'vm_oms_version': vm_oms_version
                     }
+
+                    if vm_oms_version:
+                        oms_version = version.parse(vm_oms_version)
+                        if oms_version < version.parse(MIN_PATCHED_OMS_VERSION):
+                                logger.info(f"VM {r.name} has a VULNERABLE version of OMS!")
+                                vm_item["check_oms_vulnerable"] = "YES"
+                        else:
+                            vm_item["check_oms_vulnerable"] = "NO"
+
+                    if any(ext in vm_item['vm_extensions'].split(',') for ext in OMI_EXTENSIONS):
+                        vm_item["check_omi_extension"] = "YES"
+                    else:
+                        vm_item["check_omi_extension"] = "NO"
+
+                    if any(
+                        i.get("check_permissive_rules") == "YES" for i in vm_interfaces
+                    ):
+                        vm_item["check_permissive_rules"] = "YES"
+                    else:
+                        vm_item["check_permissive_rules"] = "NO"
+
+                    if any(
+                        i.get("check_effective_permissive_rules") == "YES"
+                        for i in vm_interfaces
+                    ):
+                        vm_item["check_effective_permissive_rules"] = "YES"
+                    else:
+                        vm_item["check_effective_permissive_rules"] = "NO"
+
                     if args.runscript:
                         message = run_script_on_vm(cm, rg.name, r.name, BASH_SCRIPT)
-                        regex = r"OMI VERSION: /(.+)\n"
+                        regex = r"OMI VERSION: (.+)\n"
                         m = re.search(regex, message)
                         if not m:
-                            logger.error(f'Cannot determine OMI version number: {message}')
+                            logger.error(
+                                f"Cannot determine OMI version number: {message}"
+                            )
                         else:
                             omi_version = version.parse(m.groups(1))
-                            vm_item['omi_version'] = m.groups(1)
+                            vm_item["omi_version"] = m.groups(1)
                             if omi_version < version.parse(MIN_PATCHED_OMI_VERSION):
-                                logger.info(f'VM {r.name} is VULNERABLE')
-                                vm_item['vulnerable'] = 'YES'
-                                vm_item['script_output'] = message
+                                logger.info(f"VM {r.name} is VULNERABLE")
+                                vm_item["check_version_vulnerable"] = "YES"
+                                vm_item["bash_script_output"] = message
                             else:
-                                vm_item['vulnerable'] = 'NO'
+                                vm_item["check_version_vulnerable"] = "NO"
                         regex = r"OMI LISTENING ON TCP: (.+)\n"
                         m = re.search(regex, message)
                         if not m:
-                            logger.error(f'Cannot determine whether OMI is listening on TCP: {message}')
+                            logger.error(
+                                f"Cannot determine whether OMI is listening on TCP: {message}"
+                            )
                         else:
-                            if m.groups(1) == 'NO':
-                                logger.info(f'OMI is NOT listening on TCP, good news!')
-                                vm_item['listening_on_tcp'] = 'YES'
-                            elif m.groups(1) == 'YES':
-                                logger.info(f'OMI IS listening to TCP: {message}')
-                                vm_item['listening_on_tcp'] = 'YES'
-                                vm_item['script_output'] = message
+                            if m.groups(1) == "NO":
+                                logger.info("OMI is NOT listening on TCP")
+                                vm_item["check_omi_listening_on_socket"] = "NO"
+                            elif m.groups(1) == "YES":
+                                logger.info(f"OMI IS listening to TCP: {message}")
+                                vm_item["check_omi_listening_on_socket"] = "YES"
+                                vm_item["bash_script_output"] = message
                             else:
-                                vm_item['listening_on_tcp'] = 'UNKNOWN'
+                                vm_item["check_omi_listening_on_socket"] = "UNKNOWN"
                     if args.attack:
                         vulnerable = attack_vm(r.name, vm_interfaces)
                         if vulnerable:
-                            logger.info("MACHINE IS VULNERABLE")
+                            logger.info("Attack was successful: machine is vulnerable!")
+                            vm_item["check_attack_successful"] = "YES"
                         else:
-                            logger.info("MACHINE IS NOT VULNERABLE")
+                            logger.info("Attack was unsuccessful")
+                            vm_item["check_attack_successful"] = "NO"
 
-
-                    if args.output:
-                        for idx, ifx in enumerate(vm_interfaces):
-                            vm_item[f"if{idx}-id"] = ifx["interface_id"]
-                            vm_item[f"if{idx}-mac"] = ifx["mac_address"]
-                            vm_item[f"if{idx}-ips"] = ifx["ip_configurations"]
-                            vm_item[f"if{idx}-rules"] = ifx.get("nsg_rules", None)
-                            vm_item[f"if{idx}-effective_rules"] = ifx.get(
-                                "effective_rules", None
-                            )
-                        vm_list.append(vm_item)
+                    vm_list.append(vm_item)
         if args.output:
             vm_df = pd.DataFrame(vm_list)
-            vm_df.to_csv(args.output)
+            vm_df.to_json(args.output)
 
     except Exception as e:
         logger.error(
