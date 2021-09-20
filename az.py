@@ -27,7 +27,7 @@ OMI_EXTENSIONS = ["OMSAgentForLinux"]
 
 OMI_PORTS = [int(service.split("/")[1]) for service in OMI_SERVICES]
 
-MIN_PATCHED_OMI_VERSION = "1.6.8.1"
+MIN_PATCHED_OMI_VERSION = "1.6.8-1"
 MIN_PATCHED_OMS_VERSION = "1.13.40"
 
 BASH_SCRIPT = """
@@ -35,7 +35,7 @@ BASH_SCRIPT = """
 if [ ! "$BASH_VERSION" ] ; then
     exec /bin/bash "$0" "$@"
 fi
-REGEX="OMI\\-([0-9\\.]*)\\-"
+REGEX="OMI\\-([0-9\\.\-]*) \\-"
 
 OMIPATH="/opt/omi/bin/omiserver"
 if ! [[ -x $OMIPATH ]]; then
@@ -324,17 +324,20 @@ def check_vm_netsec(
             )
         # Effective Security Rules
         if check_effective:
-            vm_interface["effective_rules"] = check_effective_security_rules(
-                nm, interface_info, vm_name
-            )
-            vm_interface["check_permissive_effective_rules"] = (
-                "YES"
-                if parse_rules(vm_interface["effective_rules"], OMI_PORTS)
-                else "NO"
-            )
-            intf_config_string += print_rules(
-                vm_interface["effective_rules"], "Effective Security Rules"
-            )
+            try:
+                vm_interface["effective_rules"] = check_effective_security_rules(
+                    nm, interface_info, vm_name
+                )
+                vm_interface["check_permissive_effective_rules"] = (
+                    "YES"
+                    if parse_rules(vm_interface["effective_rules"], OMI_PORTS)
+                    else "NO"
+                )
+                intf_config_string += print_rules(
+                    vm_interface["effective_rules"], "Effective Security Rules"
+                )
+            except Exception as e:
+                logger.warning(f'Cannot retrieve VM Effective Security Rules, continuing. Got exception: {str(e)}')
         logger.debug(intf_config_string)
         vm_interfaces.append(vm_interface)
     return vm_interfaces
@@ -494,8 +497,14 @@ def main():
 
                     vm_interfaces: List[Dict[str, Any]] = []
                     if vm.network_profile:
+                        check_effective = False
+                        if args.effective:
+                            if vm_power_state == 'running':
+                                check_effective = True
+                            else:
+                                logger.warning(f'Cannot retrieve Effective Rules for VM {r.name}: VM power state must be "running"')
                         vm_interfaces = check_vm_netsec(
-                            nm, r.name, vm.network_profile, args.effective
+                            nm, r.name, vm.network_profile, check_effective
                         )
                     vm_extensions = retrieve_vm_extensions(cm, rg.name, r.name)
                     vm_item = {
@@ -542,38 +551,42 @@ def main():
                         vm_item["check_effective_permissive_rules"] = "NO"
 
                     if args.runscript:
-                        message = run_script_on_vm(cm, rg.name, r.name, BASH_SCRIPT)
-                        regex = r"OMI VERSION: (.+)\n"
-                        m = re.search(regex, message)
-                        if not m:
-                            logger.error(
-                                f"Cannot determine OMI version number: {message}"
-                            )
-                        else:
-                            omi_version = version.parse(m.groups(1))
-                            vm_item["omi_version"] = m.groups(1)
-                            if omi_version < version.parse(MIN_PATCHED_OMI_VERSION):
-                                logger.info(f"VM {r.name} is VULNERABLE")
-                                vm_item["check_version_vulnerable"] = "YES"
-                                vm_item["bash_script_output"] = message
+                        try:
+                            message = run_script_on_vm(cm, rg.name, r.name, BASH_SCRIPT)
+                            regex = r"OMI VERSION: (.+)\n"
+                            m = re.search(regex, message)
+                            if not m:
+                                logger.error(
+                                    f"Cannot determine OMI version number: {message}"
+                                )
                             else:
-                                vm_item["check_version_vulnerable"] = "NO"
-                        regex = r"OMI LISTENING ON TCP: (.+)\n"
-                        m = re.search(regex, message)
-                        if not m:
-                            logger.error(
-                                f"Cannot determine whether OMI is listening on TCP: {message}"
-                            )
-                        else:
-                            if m.groups(1) == "NO":
-                                logger.info("OMI is NOT listening on TCP")
-                                vm_item["check_omi_listening_on_socket"] = "NO"
-                            elif m.groups(1) == "YES":
-                                logger.info(f"OMI IS listening to TCP: {message}")
-                                vm_item["check_omi_listening_on_socket"] = "YES"
-                                vm_item["bash_script_output"] = message
+                                omi_version = version.parse(m.group(1))
+                                vm_item["omi_version"] = m.group(1)
+                                if omi_version < version.parse(MIN_PATCHED_OMI_VERSION):
+                                    logger.info(f"VM {r.name} is VULNERABLE")
+                                    vm_item["check_version_vulnerable"] = "YES"
+                                    vm_item["bash_script_output"] = message
+                                else:
+                                    vm_item["check_version_vulnerable"] = "NO"
+                            regex = r"OMI LISTENING ON TCP: (.+)\n"
+                            m = re.search(regex, message)
+                            if not m:
+                                logger.error(
+                                    f"Cannot determine whether OMI is listening on TCP: {message}"
+                                )
                             else:
-                                vm_item["check_omi_listening_on_socket"] = "UNKNOWN"
+                                if m.group(1) == "NO":
+                                    logger.info("OMI is NOT listening on TCP")
+                                    vm_item["check_omi_listening_on_socket"] = "NO"
+                                elif m.group(1) == "YES":
+                                    logger.info(f"OMI IS listening to TCP: {message}")
+                                    vm_item["check_omi_listening_on_socket"] = "YES"
+                                    vm_item["bash_script_output"] = message
+                                else:
+                                    vm_item["check_omi_listening_on_socket"] = "UNKNOWN"
+                        except Exception as e:
+                            logger.warning(f'Cannot run script on VM, continuing. Exception: {str(e)}')
+
                     if args.attack:
                         vulnerable = attack_vm(r.name, vm_interfaces)
                         if vulnerable:
