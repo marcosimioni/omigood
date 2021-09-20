@@ -1,3 +1,17 @@
+"""
+DISCLAIMER
+
+The Software and code samples available on this repository are provided "as is" without warranty of any kind, either express or implied. Use at your own risk.
+
+Original source code can be found at: https://github.com/marcosimioni/omigood
+
+Contributors
+
+- Marco Simioni
+- Francesco Vigo
+- Giordano Bianchi
+"""
+
 import sys
 import logging
 import re
