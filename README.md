@@ -79,3 +79,7 @@ optional arguments:
 - Marco Simioni
 - Francesco Vigo
 - Giordano Bianchi
+
+# DISCLAIMER
+
+The Software and code samples available on this repository are provided "as is" without warranty of any kind, either express or implied. Use at your own risk. 
