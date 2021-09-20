@@ -21,12 +21,12 @@ There isn't a straightforward way to determine whether your machines are vulnera
 
 It's worth noting that, even if the VM is vulnerable, it might not be exposing the OMI server via HTTP/HTTPS (which is the default) and, even if it does, those ports might be blocked by Azure's Network Security Groups, hence not reachable. This is not a reason to avoid patching but, if you have a lot of vulnerable Linux VMs, it might be useful to know which ones are more exposed and prioritize your efforts.
 
-`omigood` follows this approach and will produce a JSON output with a number of checks that you can trigger through command line options in order to determine your attack surface.
+`omigood` follows this more comprehensive approach and will produce a JSON output with a number of checks that you can trigger through command line options in order to determine your attack surface.
 
 These are the checks performed by `omigood`:
  - Check against Azure API if the VM is running Linux
  - Check against Azure API if the VM is running the OMSAgentForLinux extension, which is a good hint on whether the machine might be running OMI as well.
- - Check against Azure API the version of the OMS Agent, as it is often correlated to the OMI version. This check can be performed without running any script on the VM. OMS Agent should be at least version `1.13.40`.
+ - Check against Azure API the version of the OMS Agent, as it is often correlated to the OMI version. This check can be performed without running any script on the VM. OMS Agent should be at least version `1.13.40`. You can check out the script we run [here](https://github.com/marcosimioni/omigood/blob/8bc4e9c5a6e51cd456bde60508c37566c515f5b5/omigood_scanner.py#L33).
  - Check against Azure API the Network Security Groups of the VM, and determine (using a very simple algorithm that can trigger false positives) whether the OMI server ports might be open.
  - Check against Azure API the Effective Network Security Groups of the VM (combination of network interface and subnet) and determine whether the OMI server ports might be open. **This check is optional as it requires the VM to be running, higher API privileges and it takes more time to run. Enable it with the `-e` command line option.**
  - Use the Azure API to run a simple bash script on the VM that determines whether the OMI server is running, its version and whether it's exposed only on UNIX socket (default) or also TCP. **This check is optional as it requires the VM to be running, higher API privileges and it takes more time to run. Enable it with the `-r` command line option. Use at your own risk!**
@@ -49,7 +49,7 @@ The flags ('YES'/'NO') that are relevant for the checks are:
 
 ```
 usage: omigood_scanner.py [-h] [-v] [--auth {azurecli,interactivebrowser}] [-r] [-a] [-e] [-s SUBSCRIPTIONS]
-                          [-g RESOURCEGROUPS] -o OUTPUT
+                          [-g RESOURCEGROUPS] [-m VMS] -o OUTPUT
 
 OMIGood scanner for CVE-2021-38647
 
@@ -68,6 +68,8 @@ optional arguments:
   -g RESOURCEGROUPS, --resourcegroups RESOURCEGROUPS
                         [OPTIONAL] Comma separated list of Resource Group names. If not specified, it will try all. If
                         specified, it will work only with a single subscription provided.
+  -m VMS, --vms VMS     [OPTIONAL] Comma separated list of VM names. If not specified, it will try all. If specified,
+                        it will work only with a single subscription and a single resource group provided.
   -o OUTPUT, --output OUTPUT
                         JSON output file with results.
 ```
