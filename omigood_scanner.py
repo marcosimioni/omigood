@@ -283,10 +283,16 @@ def check_vm_netsec(
             f'Found network interface on VM {vm_name} named {interface_info.get("resource_name")}'
             f' on resourceGroup {interface_info.get("resource_group_name")}'
         )
-        network_interface = nm.network_interfaces.get(
-            interface_info.get("resource_group_name"),
-            interface_info.get("resource_name"),
-        )
+        try:
+            network_interface = nm.network_interfaces.get(
+                interface_info.get("resource_group_name"),
+                interface_info.get("resource_name"),
+            )
+        except Exception as e:
+            logger.error(
+                f"Got Exception getting interface \nException: {str(e)}\n{traceback.format_exc()}"
+            )
+            continue
 
         if not network_interface or not network_interface.ip_configurations:
             logger.debug(
