@@ -564,10 +564,13 @@ def main():
                             f"Skipping VM {r.name}: cannot retrieve VM metadata"
                         )
                         continue
-                    if not vm.os_profile.linux_configuration:
-                        logger.debug(f"Skipping VM {r.name}: not Linux")
-                        continue  # not Linux
-
+                    if hasattr(vm, "os_profile") and vm.os_profile:
+                        if not vm.os_profile.linux_configuration:
+                            logger.debug(f"Skipping VM {r.name}: not Linux")
+                            continue  # not Linux
+                    else:
+                        print(f"error getting os_profile {r.name}")
+                        continue
                     logger.info(f"Found Linux VM: {r.name} with id {r.id}")
 
                     vm_state = cm.virtual_machines.instance_view(rg.name, r.name)
